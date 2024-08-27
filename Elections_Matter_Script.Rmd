@@ -1,0 +1,3490 @@
+---
+title: "Elections Matter Script"
+author: "Soroush Moallef"
+date: "2024-08-21"
+output: html_document
+---
+
+#Dependencies
+```{r}
+library(ggplot2)
+library(reshape2)
+library(dplyr)
+library(haven)
+library(foreign)
+library(readr)
+library(data.table)
+library(tidyverse)
+library(readxl)
+library(broom)
+library(cowplot)
+library(gridExtra)
+```
+
+
+#Datasets
+```{r}
+
+#Read datasets in:
+imr_2022_2024 <- readRDS(file = "final_imr_2022_2024.rds")
+imr_2012_2024_total_pop<-readRDS(file = "/imr_2012_2024_total_pop.rds")
+racial_premature_mortality_2022_2024 <- readRDS(file = "cdc_final_racial_premature_deaths_2022_2024_data.rds")
+premature_mortality_2022_2024<-readRDS(file = "/premature_mortality_2022_2024.rds")
+total_premature_mortality_2012_2024 <- readRDS(file = "cdc_final_total_premature_deaths_2012_2024_data.rds")
+us_total_premature_mortality_2012_2024 <- read_csv(file ="Premature Mortality Total for US total.csv")  
+flu_vaccination_data <- read_csv("2024-senior-report.csv") 
+final_child_vaccines_2022_data <- readRDS(file = "final_child _vaccines_2022data.rds")
+nis_adult_covid_vaccines<-read_csv("National_Immunization_Survey_Adult_COVID_Module__NIS-ACM___COVIDVaxViews__Data___Centers_for_Disease_Control_and_Prevention__cdc.gov__20240701.csv")
+nis_adult_covid_BOOSTER_vaccines <- nis_adult_covid_vaccines%>%
+  filter( `Indicator Name` == "Vaccination Coverage and Intent" & `Group Category` == "65+ years" & `Geography Type` == "Jurisdictional Estimates" & `Indicator Category` == "Received a 2023-2024 COVID-19 vaccine dose (among all adults 18+)")
+food_insecurity<-readRDS(file = "food_insecurity_2020to2022.rds")
+maternity_care_deserts <-read_csv("2023-hwc-report-report-data-all-states.csv")
+child_poverty <-read_excel("Children in poverty.xlsx")
+final_child_poverty_2012_2024 <- readRDS(file = "final_child_poverty_2012_2022_DC.rds")
+final_elderly_poverty_2012_2024_data <- readRDS(file = "final_elderly_poverty_2012_2024_data.rds")
+CookPVI_2022_state_scores<-readRDS(file = "/CookPVI_2022_state_scores.rds")
+statelib<-read_dta("CaugheyWarshaw_DynamicDemocracyAmericanStates_Export_2021.dta") 
+statelib_2012_to_2020_data <- readRDS(file = "flipped_statelib_2012_to_2020_data.rds")
+state_trifecta<-read_excel("State Trifecta data.xlsx") 
+state_trifecta_2012_2024_data<-read_csv("Trifecta Trends by State and Year.csv") 
+DW_House_112<-read_csv("H112_members.csv") 
+DW_House_113<-read_csv("H113_members.csv") 
+DW_House_114<-read_csv("H114_members.csv") 
+DW_House_115<-read_csv("H115_members.csv") 
+DW_House_116<-read_csv("H116_members.csv") 
+DW_House_117<-read_csv("H117_members.csv") 
+DW_House_118<-read_csv("H118_members.csv") 
+data_list <- list(DW_House_112, DW_House_113, DW_House_114, DW_House_115, DW_House_116, DW_House_117, DW_House_118)
+combined_DW_House_data <- do.call(rbind, data_list)
+#write.csv(combined_DW_House_data, file ="combined_DW_House_data_112_118.csv")
+combined_DW_House_data_112_118<-read_csv("Tcombined_DW_House_data_112_118.csv") DW_Senate_112<-read_csv("S112_members.csv") 
+DW_Senate_113<-read_csv("S113_members.csv") 
+DW_Senate_114<-read_csv("S114_members.csv") 
+DW_Senate_115<-read_csv("/S115_members.csv") 
+DW_Senate_116<-read_csv("S116_members.csv") 
+DW_Senate_117<-read_csv("S117_members.csv") 
+DW_Senate_118<-read_csv("S118_members.csv") 
+senate_list <- list(DW_Senate_112, DW_Senate_113, DW_Senate_114, DW_Senate_115, DW_Senate_116, DW_Senate_117, DW_Senate_118)
+combined_DW_Senate_data <- do.call(rbind, senate_list)
+head(combined_DW_Senate_data)
+#write.csv(combined_DW_Senate_data, file ="combined_DW_Senate_data_112_118.csv")
+combined_DW_Senate_data_112_118<-read_csv("combined_DW_Senate_data_112_118.csv")
+
+
+```
+
+#Data cleaning for cross-sectional and trend analysis
+```{r}
+
+#ACS uninsured columns to keep for current period (2022)
+columns_to_keep <- c(
+  "NAME_E", 
+  "AQHPE015", # Estimates: Male: 35 to 44 years
+  "AQHPE017", # Estimates: Male: 35 to 44 years: No health insurance coverage
+  "AQHPE018", # Estimates: Male: 45 to 54 years
+  "AQHPE020", # Estimates: Male: 45 to 54 years: No health insurance coverage
+  "AQHPE021", # Estimates: Male: 55 to 64 years
+  "AQHPE023", # Estimates: Male: 55 to 64 years: No health insurance coverage
+  "AQHPE043", # Estimates: Female: 35 to 44 years
+  "AQHPE045", # Estimates: Female: 35 to 44 years: No health insurance coverage
+  "AQHPE046", # Estimates: Female: 45 to 54 years
+  "AQHPE048", # Estimates: Female: 45 to 54 years: No health insurance coverage
+  "AQHPE049", # Estimates: Female: 55 to 64 years
+  "AQHPE051"  # Estimates: Female: 55 to 64 years: No health insurance coverage
+)
+
+new_uninsured_acs2022data <- uninsured_acs2022data %>%
+  select(all_of(columns_to_keep))
+
+
+#% uninsured trend analysis
+uninsured_acs2012data <- read_csv("uninsured/acsdata/nhgis0007_csv/nhgis0007_ds189_2012_state.csv")
+
+
+#columns to keep
+selected_uninsured_acs2012data <- uninsured_acs2012data %>%
+  select(
+    YEAR,
+    STATE,
+    Female_35_44 = PIXE043, # Female: 35 to 44 years
+    Female_35_44_Insured = PIXE044, # Female: 35 to 44 years: With health insurance coverage
+    Female_35_44_Uninsured = PIXE045, # Female: 35 to 44 years: No health insurance coverage
+    Female_45_54 = PIXE046, # Female: 45 to 54 years
+    Female_45_54_Insured = PIXE047, # Female: 45 to 54 years: With health insurance coverage
+    Female_45_54_Uninsured = PIXE048, # Female: 45 to 54 years: No health insurance coverage
+    Female_55_64 = PIXE049, # Female: 55 to 64 years
+    Female_55_64_Insured = PIXE050, # Female: 55 to 64 years: With health insurance coverage
+    Female_55_64_Uninsured = PIXE051, # Female: 55 to 64 years: No health insurance coverage
+    Male_35_44 = PIXE015, # Male: 35 to 44 years
+    Male_35_44_Insured = PIXE016, # Male: 35 to 44 years: With health insurance coverage
+    Male_35_44_Uninsured = PIXE017, # Male: 35 to 44 years: No health insurance coverage
+    Male_45_54 = PIXE018, # Male: 45 to 54 years
+    Male_45_54_Insured = PIXE019, # Male: 45 to 54 years: With health insurance coverage
+    Male_45_54_Uninsured = PIXE020, # Male: 45 to 54 years: No health insurance coverage
+    Male_55_64 = PIXE021, # Male: 55 to 64 years
+    Male_55_64_Insured = PIXE022, # Male: 55 to 64 years: With health insurance coverage
+    Male_55_64_Uninsured = PIXE023, # Male: 55 to 64 years: No health insurance coverage
+    Female_35_44_Error = PIXM043, # Female: 35 to 44 years (Margin of Error)
+    Female_35_44_Insured_Error = PIXM044, # Female: 35 to 44 years: With health insurance coverage (Margin of Error)
+    Female_35_44_Uninsured_Error = PIXM045, # Female: 35 to 44 years: No health insurance coverage (Margin of Error)
+    Female_45_54_Error = PIXM046, # Female: 45 to 54 years (Margin of Error)
+    Female_45_54_Insured_Error = PIXM047, # Female: 45 to 54 years: With health insurance coverage (Margin of Error)
+    Female_45_54_Uninsured_Error = PIXM048, # Female: 45 to 54 years: No health insurance coverage (Margin of Error)
+    Female_55_64_Error = PIXM049, # Female: 55 to 64 years (Margin of Error)
+    Female_55_64_Insured_Error = PIXM050, # Female: 55 to 64 years: With health insurance coverage (Margin of Error)
+    Female_55_64_Uninsured_Error = PIXM051, # Female: 55 to 64 years: No health insurance coverage (Margin of Error)
+    Male_35_44_Error = PIXM015, # Male: 35 to 44 years (Margin of Error)
+    Male_35_44_Insured_Error = PIXM016, # Male: 35 to 44 years: With health insurance coverage (Margin of Error)
+    Male_35_44_Uninsured_Error = PIXM017, # Male: 35 to 44 years: No health insurance coverage (Margin of Error)
+    Male_45_54_Error = PIXM018, # Male: 45 to 54 years (Margin of Error)
+    Male_45_54_Insured_Error = PIXM019, # Male: 45 to 54 years: With health insurance coverage (Margin of Error)
+    Male_45_54_Uninsured_Error = PIXM020, # Male: 45 to 54 years: No health insurance coverage (Margin of Error)
+    Male_55_64_Error = PIXM021, # Male: 55 to 64 years (Margin of Error)
+    Male_55_64_Insured_Error = PIXM022, # Male: 55 to 64 years: With health insurance coverage (Margin of Error)
+    Male_55_64_Uninsured_Error = PIXM023 # Male: 55 to 64 years: No health insurance coverage (Margin of Error)
+  )
+
+final_total_acs2012_uninsured <- selected_uninsured_acs2012data %>%
+  mutate(
+    Total_35_44_Insured = Female_35_44_Insured + Male_35_44_Insured,
+    Total_35_44_Uninsured = Female_35_44_Uninsured + Male_35_44_Uninsured,
+    Total_45_54_Insured = Female_45_54_Insured + Male_45_54_Insured,
+    Total_45_54_Uninsured = Female_45_54_Uninsured + Male_45_54_Uninsured,
+    Total_55_64_Insured = Female_55_64_Insured + Male_55_64_Insured,
+    Total_55_64_Uninsured = Female_55_64_Uninsured + Male_55_64_Uninsured,
+    Total_35_44 = Female_35_44 + Male_35_44,
+    Total_45_54 = Female_45_54 + Male_45_54,
+    Total_55_64 = Female_55_64 + Male_55_64,
+    Total_35_44_Error = sqrt(Female_35_44_Error^2 + Male_35_44_Error^2),
+    Total_35_44_Insured_Error = sqrt(Female_35_44_Insured_Error^2 + Male_35_44_Insured_Error^2),
+    Total_35_44_Uninsured_Error = sqrt(Female_35_44_Uninsured_Error^2 + Male_35_44_Uninsured_Error^2),
+    Total_45_54_Error = sqrt(Female_45_54_Error^2 + Male_45_54_Error^2),
+    Total_45_54_Insured_Error = sqrt(Female_45_54_Insured_Error^2 + Male_45_54_Insured_Error^2),
+    Total_45_54_Uninsured_Error = sqrt(Female_45_54_Uninsured_Error^2 + Male_45_54_Uninsured_Error^2),
+    Total_55_64_Error = sqrt(Female_55_64_Error^2 + Male_55_64_Error^2),
+    Total_55_64_Insured_Error = sqrt(Female_55_64_Insured_Error^2 + Male_55_64_Insured_Error^2),
+    Total_55_64_Uninsured_Error = sqrt(Female_55_64_Uninsured_Error^2 + Male_55_64_Uninsured_Error^2)
+  )
+
+final_total_acs2012_uninsured <- final_total_acs2012_uninsured %>%
+  select(
+    YEAR, # Year of the data
+    STATE, # State of the data
+    Total_35_44,
+    Total_35_44_Insured, # Total insured in age group 35-44
+    Total_35_44_Uninsured, # Total uninsured in age group 35-44
+    Total_45_54,
+    Total_45_54_Insured, # Total insured in age group 45-54
+    Total_45_54_Uninsured, # Total uninsured in age group 45-54
+    Total_55_64,
+    Total_55_64_Insured, # Total insured in age group 55-64
+    Total_55_64_Uninsured, # Total uninsured in age group 55-64
+    Total_35_44_Error, # Total margin of error in age group 35-44
+    Total_35_44_Insured_Error, # Total insured margin of error in age group 35-44
+    Total_35_44_Uninsured_Error, # Total uninsured margin of error in age group 35-44
+    Total_45_54_Error, # Total margin of error in age group 45-54
+    Total_45_54_Insured_Error, # Total insured margin of error in age group 45-54
+    Total_45_54_Uninsured_Error, # Total uninsured margin of error in age group 45-54
+    Total_55_64_Error, # Total margin of error in age group 55-64
+    Total_55_64_Insured_Error, # Total insured margin of error in age group 55-64
+    Total_55_64_Uninsured_Error # Total uninsured margin of error in age group 55-64
+  )
+
+
+####2013
+uninsured_acs2013data <- read_csv("uninsured/acsdata/nhgis0007_csv/nhgis0007_ds199_2013_state.csv")
+
+selected_uninsured_acs2013data <- uninsured_acs2013data %>%
+  select(
+    YEAR, # Year of the data
+    STATE, # State of the data
+    Female_35_44 = S7PE043, # Female: 35 to 44 years
+    Female_35_44_Insured = S7PE044, # Female: 35 to 44 years: With health insurance coverage
+    Female_35_44_Uninsured = S7PE045, # Female: 35 to 44 years: No health insurance coverage
+    Female_45_54 = S7PE046, # Female: 45 to 54 years
+    Female_45_54_Insured = S7PE047, # Female: 45 to 54 years: With health insurance coverage
+    Female_45_54_Uninsured = S7PE048, # Female: 45 to 54 years: No health insurance coverage
+    Female_55_64 = S7PE049, # Female: 55 to 64 years
+    Female_55_64_Insured = S7PE050, # Female: 55 to 64 years: With health insurance coverage
+    Female_55_64_Uninsured = S7PE051, # Female: 55 to 64 years: No health insurance coverage
+    Male_35_44 = S7PE015, # Male: 35 to 44 years
+    Male_35_44_Insured = S7PE016, # Male: 35 to 44 years: With health insurance coverage
+    Male_35_44_Uninsured = S7PE017, # Male: 35 to 44 years: No health insurance coverage
+    Male_45_54 = S7PE018, # Male: 45 to 54 years
+    Male_45_54_Insured = S7PE019, # Male: 45 to 54 years: With health insurance coverage
+    Male_45_54_Uninsured = S7PE020, # Male: 45 to 54 years: No health insurance coverage
+    Male_55_64 = S7PE021, # Male: 55 to 64 years
+    Male_55_64_Insured = S7PE022, # Male: 55 to 64 years: With health insurance coverage
+    Male_55_64_Uninsured = S7PE023, # Male: 55 to 64 years: No health insurance coverage
+    Female_35_44_Error = S7PM043, # Female: 35 to 44 years (Margin of Error)
+    Female_35_44_Insured_Error = S7PM044, # Female: 35 to 44 years: With health insurance coverage (Margin of Error)
+    Female_35_44_Uninsured_Error = S7PM045, # Female: 35 to 44 years: No health insurance coverage (Margin of Error)
+    Female_45_54_Error = S7PM046, # Female: 45 to 54 years (Margin of Error)
+    Female_45_54_Insured_Error = S7PM047, # Female: 45 to 54 years: With health insurance coverage (Margin of Error)
+    Female_45_54_Uninsured_Error = S7PM048, # Female: 45 to 54 years: No health insurance coverage (Margin of Error)
+    Female_55_64_Error = S7PM049, # Female: 55 to 64 years (Margin of Error)
+    Female_55_64_Insured_Error = S7PM050, # Female: 55 to 64 years: With health insurance coverage (Margin of Error)
+    Female_55_64_Uninsured_Error = S7PM051, # Female: 55 to 64 years: No health insurance coverage (Margin of Error)
+    Male_35_44_Error = S7PM015, # Male: 35 to 44 years (Margin of Error)
+    Male_35_44_Insured_Error = S7PM016, # Male: 35 to 44 years: With health insurance coverage (Margin of Error)
+    Male_35_44_Uninsured_Error = S7PM017, # Male: 35 to 44 years: No health insurance coverage (Margin of Error)
+    Male_45_54_Error = S7PM018, # Male: 45 to 54 years (Margin of Error)
+    Male_45_54_Insured_Error = S7PM019, # Male: 45 to 54 years: With health insurance coverage (Margin of Error)
+    Male_45_54_Uninsured_Error = S7PM020, # Male: 45 to 54 years: No health insurance coverage (Margin of Error)
+    Male_55_64_Error = S7PM021, # Male: 55 to 64 years (Margin of Error)
+    Male_55_64_Insured_Error = S7PM022, # Male: 55 to 64 years: With health insurance coverage (Margin of Error)
+    Male_55_64_Uninsured_Error = S7PM023 # Male: 55 to 64 years: No health insurance coverage (Margin of Error)
+  )
+
+final_total_acs2013_uninsured <- selected_uninsured_acs2013data %>%
+  mutate(
+    Total_35_44_Insured = Female_35_44_Insured + Male_35_44_Insured,
+    Total_35_44_Uninsured = Female_35_44_Uninsured + Male_35_44_Uninsured,
+    Total_45_54_Insured = Female_45_54_Insured + Male_45_54_Insured,
+    Total_45_54_Uninsured = Female_45_54_Uninsured + Male_45_54_Uninsured,
+    Total_55_64_Insured = Female_55_64_Insured + Male_55_64_Insured,
+    Total_55_64_Uninsured = Female_55_64_Uninsured + Male_55_64_Uninsured,
+    Total_35_44 = Female_35_44 + Male_35_44,
+    Total_45_54 = Female_45_54 + Male_45_54,
+    Total_55_64 = Female_55_64 + Male_55_64,
+    Total_35_44_Error = sqrt(Female_35_44_Error^2 + Male_35_44_Error^2),
+    Total_35_44_Insured_Error = sqrt(Female_35_44_Insured_Error^2 + Male_35_44_Insured_Error^2),
+    Total_35_44_Uninsured_Error = sqrt(Female_35_44_Uninsured_Error^2 + Male_35_44_Uninsured_Error^2),
+    Total_45_54_Error = sqrt(Female_45_54_Error^2 + Male_45_54_Error^2),
+    Total_45_54_Insured_Error = sqrt(Female_45_54_Insured_Error^2 + Male_45_54_Insured_Error^2),
+    Total_45_54_Uninsured_Error = sqrt(Female_45_54_Uninsured_Error^2 + Male_45_54_Uninsured_Error^2),
+    Total_55_64_Error = sqrt(Female_55_64_Error^2 + Male_55_64_Error^2),
+    Total_55_64_Insured_Error = sqrt(Female_55_64_Insured_Error^2 + Male_55_64_Insured_Error^2),
+    Total_55_64_Uninsured_Error = sqrt(Female_55_64_Uninsured_Error^2 + Male_55_64_Uninsured_Error^2)
+  )
+
+final_total_acs2013_uninsured <- final_total_acs2013_uninsured %>%
+  select(
+    YEAR, # Year of the data
+    STATE, # State of the data
+    Total_35_44,
+    Total_35_44_Insured, # Total insured in age group 35-44
+    Total_35_44_Uninsured, # Total uninsured in age group 35-44
+    Total_45_54,
+    Total_45_54_Insured, # Total insured in age group 45-54
+    Total_45_54_Uninsured, # Total uninsured in age group 45-54
+    Total_55_64,
+    Total_55_64_Insured, # Total insured in age group 55-64
+    Total_55_64_Uninsured, # Total uninsured in age group 55-64
+    Total_35_44_Error, # Total margin of error in age group 35-44
+    Total_35_44_Insured_Error, # Total insured margin of error in age group 35-44
+    Total_35_44_Uninsured_Error, # Total uninsured margin of error in age group 35-44
+    Total_45_54_Error, # Total margin of error in age group 45-54
+    Total_45_54_Insured_Error, # Total insured margin of error in age group 45-54
+    Total_45_54_Uninsured_Error, # Total uninsured margin of error in age group 45-54
+    Total_55_64_Error, # Total margin of error in age group 55-64
+    Total_55_64_Insured_Error, # Total insured margin of error in age group 55-64
+    Total_55_64_Uninsured_Error # Total uninsured margin of error in age group 55-64
+  )
+
+
+######2014
+uninsured_acs2014data <- read_csv("uninsured/acsdata/nhgis0007_csv/nhgis0007_ds205_2014_state.csv")
+
+
+selected_uninsured_acs2014data <- uninsured_acs2014data %>%
+  select(
+    YEAR, # Year of the data
+    STATE, # State of the data
+    Female_35_44 = AA5KE043, # Female: 35 to 44 years
+    Female_35_44_Insured = AA5KE044, # Female: 35 to 44 years: With health insurance coverage
+    Female_35_44_Uninsured = AA5KE045, # Female: 35 to 44 years: No health insurance coverage
+    Female_45_54 = AA5KE046, # Female: 45 to 54 years
+    Female_45_54_Insured = AA5KE047, # Female: 45 to 54 years: With health insurance coverage
+    Female_45_54_Uninsured = AA5KE048, # Female: 45 to 54 years: No health insurance coverage
+    Female_55_64 = AA5KE049, # Female: 55 to 64 years
+    Female_55_64_Insured = AA5KE050, # Female: 55 to 64 years: With health insurance coverage
+    Female_55_64_Uninsured = AA5KE051, # Female: 55 to 64 years: No health insurance coverage
+    Male_35_44 = AA5KE015, # Male: 35 to 44 years
+    Male_35_44_Insured = AA5KE016, # Male: 35 to 44 years: With health insurance coverage
+    Male_35_44_Uninsured = AA5KE017, # Male: 35 to 44 years: No health insurance coverage
+    Male_45_54 = AA5KE018, # Male: 45 to 54 years
+    Male_45_54_Insured = AA5KE019, # Male: 45 to 54 years: With health insurance coverage
+    Male_45_54_Uninsured = AA5KE020, # Male: 45 to 54 years: No health insurance coverage
+    Male_55_64 = AA5KE021, # Male: 55 to 64 years
+    Male_55_64_Insured = AA5KE022, # Male: 55 to 64 years: With health insurance coverage
+    Male_55_64_Uninsured = AA5KE023, # Male: 55 to 64 years: No health insurance coverage
+    Female_35_44_Error = AA5KM043, # Female: 35 to 44 years (Margin of Error)
+    Female_35_44_Insured_Error = AA5KM044, # Female: 35 to 44 years: With health insurance coverage (Margin of Error)
+    Female_35_44_Uninsured_Error = AA5KM045, # Female: 35 to 44 years: No health insurance coverage (Margin of Error)
+    Female_45_54_Error = AA5KM046, # Female: 45 to 54 years (Margin of Error)
+    Female_45_54_Insured_Error = AA5KM047, # Female: 45 to 54 years: With health insurance coverage (Margin of Error)
+    Female_45_54_Uninsured_Error = AA5KM048, # Female: 45 to 54 years: No health insurance coverage (Margin of Error)
+    Female_55_64_Error = AA5KM049, # Female: 55 to 64 years (Margin of Error)
+    Female_55_64_Insured_Error = AA5KM050, # Female: 55 to 64 years: With health insurance coverage (Margin of Error)
+    Female_55_64_Uninsured_Error = AA5KM051, # Female: 55 to 64 years: No health insurance coverage (Margin of Error)
+    Male_35_44_Error = AA5KM015, # Male: 35 to 44 years (Margin of Error)
+    Male_35_44_Insured_Error = AA5KM016, # Male: 35 to 44 years: With health insurance coverage (Margin of Error)
+    Male_35_44_Uninsured_Error = AA5KM017, # Male: 35 to 44 years: No health insurance coverage (Margin of Error)
+    Male_45_54_Error = AA5KM018, # Male: 45 to 54 years (Margin of Error)
+    Male_45_54_Insured_Error = AA5KM019, # Male: 45 to 54 years: With health insurance coverage (Margin of Error)
+    Male_45_54_Uninsured_Error = AA5KM020, # Male: 45 to 54 years: No health insurance coverage (Margin of Error)
+    Male_55_64_Error = AA5KM021, # Male: 55 to 64 years (Margin of Error)
+    Male_55_64_Insured_Error = AA5KM022, # Male: 55 to 64 years: With health insurance coverage (Margin of Error)
+    Male_55_64_Uninsured_Error = AA5KM023 # Male: 55 to 64 years: No health insurance coverage (Margin of Error)
+  )
+
+final_total_acs2014_uninsured <- selected_uninsured_acs2014data %>%
+  mutate(
+    Total_35_44_Insured = Female_35_44_Insured + Male_35_44_Insured,
+    Total_35_44_Uninsured = Female_35_44_Uninsured + Male_35_44_Uninsured,
+    Total_45_54_Insured = Female_45_54_Insured + Male_45_54_Insured,
+    Total_45_54_Uninsured = Female_45_54_Uninsured + Male_45_54_Uninsured,
+    Total_55_64_Insured = Female_55_64_Insured + Male_55_64_Insured,
+    Total_55_64_Uninsured = Female_55_64_Uninsured + Male_55_64_Uninsured,
+    Total_35_44 = Female_35_44 + Male_35_44,
+    Total_45_54 = Female_45_54 + Male_45_54,
+    Total_55_64 = Female_55_64 + Male_55_64,
+    Total_35_44_Error = sqrt(Female_35_44_Error^2 + Male_35_44_Error^2),
+    Total_35_44_Insured_Error = sqrt(Female_35_44_Insured_Error^2 + Male_35_44_Insured_Error^2),
+    Total_35_44_Uninsured_Error = sqrt(Female_35_44_Uninsured_Error^2 + Male_35_44_Uninsured_Error^2),
+    Total_45_54_Error = sqrt(Female_45_54_Error^2 + Male_45_54_Error^2),
+    Total_45_54_Insured_Error = sqrt(Female_45_54_Insured_Error^2 + Male_45_54_Insured_Error^2),
+    Total_45_54_Uninsured_Error = sqrt(Female_45_54_Uninsured_Error^2 + Male_45_54_Uninsured_Error^2),
+    Total_55_64_Error = sqrt(Female_55_64_Error^2 + Male_55_64_Error^2),
+    Total_55_64_Insured_Error = sqrt(Female_55_64_Insured_Error^2 + Male_55_64_Insured_Error^2),
+    Total_55_64_Uninsured_Error = sqrt(Female_55_64_Uninsured_Error^2 + Male_55_64_Uninsured_Error^2)
+  )
+
+final_total_acs2014_uninsured <- final_total_acs2014_uninsured %>%
+  select(
+    YEAR, # Year of the data
+    STATE, # State of the data
+    Total_35_44,
+    Total_35_44_Insured, # Total insured in age group 35-44
+    Total_35_44_Uninsured, # Total uninsured in age group 35-44
+    Total_45_54,
+    Total_45_54_Insured, # Total insured in age group 45-54
+    Total_45_54_Uninsured, # Total uninsured in age group 45-54
+    Total_55_64,
+    Total_55_64_Insured, # Total insured in age group 55-64
+    Total_55_64_Uninsured, # Total uninsured in age group 55-64
+    Total_35_44_Error, # Total margin of error in age group 35-44
+    Total_35_44_Insured_Error, # Total insured margin of error in age group 35-44
+    Total_35_44_Uninsured_Error, # Total uninsured margin of error in age group 35-44
+    Total_45_54_Error, # Total margin of error in age group 45-54
+    Total_45_54_Insured_Error, # Total insured margin of error in age group 45-54
+    Total_45_54_Uninsured_Error, # Total uninsured margin of error in age group 45-54
+    Total_55_64_Error, # Total margin of error in age group 55-64
+    Total_55_64_Insured_Error, # Total insured margin of error in age group 55-64
+    Total_55_64_Uninsured_Error # Total uninsured margin of error in age group 55-64
+  )
+
+
+####2015
+
+uninsured_acs2015data <- read_csv("uninsured/acsdata/nhgis0007_csv/nhgis0007_ds214_2015_state.csv")
+
+selected_uninsured_acs2015data <- uninsured_acs2015data %>%
+  select(
+    YEAR, # Year of the data
+    STATE, # State of the data
+    Female_35_44 = ADFEE043, # Female: 35 to 44 years
+    Female_35_44_Insured = ADFEE044, # Female: 35 to 44 years: With health insurance coverage
+    Female_35_44_Uninsured = ADFEE045, # Female: 35 to 44 years: No health insurance coverage
+    Female_45_54 = ADFEE046, # Female: 45 to 54 years
+    Female_45_54_Insured = ADFEE047, # Female: 45 to 54 years: With health insurance coverage
+    Female_45_54_Uninsured = ADFEE048, # Female: 45 to 54 years: No health insurance coverage
+    Female_55_64 = ADFEE049, # Female: 55 to 64 years
+    Female_55_64_Insured = ADFEE050, # Female: 55 to 64 years: With health insurance coverage
+    Female_55_64_Uninsured = ADFEE051, # Female: 55 to 64 years: No health insurance coverage
+    Male_35_44 = ADFEE015, # Male: 35 to 44 years
+    Male_35_44_Insured = ADFEE016, # Male: 35 to 44 years: With health insurance coverage
+    Male_35_44_Uninsured = ADFEE017, # Male: 35 to 44 years: No health insurance coverage
+    Male_45_54 = ADFEE018, # Male: 45 to 54 years
+    Male_45_54_Insured = ADFEE019, # Male: 45 to 54 years: With health insurance coverage
+    Male_45_54_Uninsured = ADFEE020, # Male: 45 to 54 years: No health insurance coverage
+    Male_55_64 = ADFEE021, # Male: 55 to 64 years
+    Male_55_64_Insured = ADFEE022, # Male: 55 to 64 years: With health insurance coverage
+    Male_55_64_Uninsured = ADFEE023, # Male: 55 to 64 years: No health insurance coverage
+    Female_35_44_Error = ADFEM043, # Female: 35 to 44 years (Margin of Error)
+    Female_35_44_Insured_Error = ADFEM044, # Female: 35 to 44 years: With health insurance coverage (Margin of Error)
+    Female_35_44_Uninsured_Error = ADFEM045, # Female: 35 to 44 years: No health insurance coverage (Margin of Error)
+    Female_45_54_Error = ADFEM046, # Female: 45 to 54 years (Margin of Error)
+    Female_45_54_Insured_Error = ADFEM047, # Female: 45 to 54 years: With health insurance coverage (Margin of Error)
+    Female_45_54_Uninsured_Error = ADFEM048, # Female: 45 to 54 years: No health insurance coverage (Margin of Error)
+    Female_55_64_Error = ADFEM049, # Female: 55 to 64 years (Margin of Error)
+    Female_55_64_Insured_Error = ADFEM050, # Female: 55 to 64 years: With health insurance coverage (Margin of Error)
+    Female_55_64_Uninsured_Error = ADFEM051, # Female: 55 to 64 years: No health insurance coverage (Margin of Error)
+    Male_35_44_Error = ADFEM015, # Male: 35 to 44 years (Margin of Error)
+    Male_35_44_Insured_Error = ADFEM016, # Male: 35 to 44 years: With health insurance coverage (Margin of Error)
+    Male_35_44_Uninsured_Error = ADFEM017, # Male: 35 to 44 years: No health insurance coverage (Margin of Error)
+    Male_45_54_Error = ADFEM018, # Male: 45 to 54 years (Margin of Error)
+    Male_45_54_Insured_Error = ADFEM019, # Male: 45 to 54 years: With health insurance coverage (Margin of Error)
+    Male_45_54_Uninsured_Error = ADFEM020, # Male: 45 to 54 years: No health insurance coverage (Margin of Error)
+    Male_55_64_Error = ADFEM021, # Male: 55 to 64 years (Margin of Error)
+    Male_55_64_Insured_Error = ADFEM022, # Male: 55 to 64 years: With health insurance coverage (Margin of Error)
+    Male_55_64_Uninsured_Error = ADFEM023 # Male: 55 to 64 years: No health insurance coverage (Margin of Error)
+  )
+
+final_total_acs2015_uninsured <- selected_uninsured_acs2015data %>%
+  mutate(
+    Total_35_44_Insured = Female_35_44_Insured + Male_35_44_Insured,
+    Total_35_44_Uninsured = Female_35_44_Uninsured + Male_35_44_Uninsured,
+    Total_45_54_Insured = Female_45_54_Insured + Male_45_54_Insured,
+    Total_45_54_Uninsured = Female_45_54_Uninsured + Male_45_54_Uninsured,
+    Total_55_64_Insured = Female_55_64_Insured + Male_55_64_Insured,
+    Total_55_64_Uninsured = Female_55_64_Uninsured + Male_55_64_Uninsured,
+    Total_35_44 = Female_35_44 + Male_35_44,
+    Total_45_54 = Female_45_54 + Male_45_54,
+    Total_55_64 = Female_55_64 + Male_55_64,
+    Total_35_44_Error = sqrt(Female_35_44_Error^2 + Male_35_44_Error^2),
+    Total_35_44_Insured_Error = sqrt(Female_35_44_Insured_Error^2 + Male_35_44_Insured_Error^2),
+    Total_35_44_Uninsured_Error = sqrt(Female_35_44_Uninsured_Error^2 + Male_35_44_Uninsured_Error^2),
+    Total_45_54_Error = sqrt(Female_45_54_Error^2 + Male_45_54_Error^2),
+    Total_45_54_Insured_Error = sqrt(Female_45_54_Insured_Error^2 + Male_45_54_Insured_Error^2),
+    Total_45_54_Uninsured_Error = sqrt(Female_45_54_Uninsured_Error^2 + Male_45_54_Uninsured_Error^2),
+    Total_55_64_Error = sqrt(Female_55_64_Error^2 + Male_55_64_Error^2),
+    Total_55_64_Insured_Error = sqrt(Female_55_64_Insured_Error^2 + Male_55_64_Insured_Error^2),
+    Total_55_64_Uninsured_Error = sqrt(Female_55_64_Uninsured_Error^2 + Male_55_64_Uninsured_Error^2)
+  )
+
+# Select final columns for output
+final_total_acs2015_uninsured <- final_total_acs2015_uninsured %>%
+  select(
+    YEAR, # Year of the data
+    STATE, # State of the data
+    Total_35_44,
+    Total_35_44_Insured, # Total insured in age group 35-44
+    Total_35_44_Uninsured, # Total uninsured in age group 35-44
+    Total_45_54,
+    Total_45_54_Insured, # Total insured in age group 45-54
+    Total_45_54_Uninsured, # Total uninsured in age group 45-54
+    Total_55_64,
+    Total_55_64_Insured, # Total insured in age group 55-64
+    Total_55_64_Uninsured, # Total uninsured in age group 55-64
+    Total_35_44_Error, # Total margin of error in age group 35-44
+    Total_35_44_Insured_Error, # Total insured margin of error in age group 35-44
+    Total_35_44_Uninsured_Error, # Total uninsured margin of error in age group 35-44
+    Total_45_54_Error, # Total margin of error in age group 45-54
+    Total_45_54_Insured_Error, # Total insured margin of error in age group 45-54
+    Total_45_54_Uninsured_Error, # Total uninsured margin of error in age group 45-54
+    Total_55_64_Error, # Total margin of error in age group 55-64
+    Total_55_64_Insured_Error, # Total insured margin of error in age group 55-64
+    Total_55_64_Uninsured_Error # Total uninsured margin of error in age group 55-64
+  )
+
+
+
+####2016
+
+uninsured_acs2016data <- read_csv("uninsured/acsdata/nhgis0007_csv/nhgis0007_ds223_2016_state.csv")
+
+selected_uninsured_acs2016data <- uninsured_acs2016data %>%
+  select(
+    YEAR, # Year of the data
+    STATE, # State of the data
+    Female_35_44 = AFWOE043, # Female: 35 to 44 years
+    Female_35_44_Insured = AFWOE044, # Female: 35 to 44 years: With health insurance coverage
+    Female_35_44_Uninsured = AFWOE045, # Female: 35 to 44 years: No health insurance coverage
+    Female_45_54 = AFWOE046, # Female: 45 to 54 years
+    Female_45_54_Insured = AFWOE047, # Female: 45 to 54 years: With health insurance coverage
+    Female_45_54_Uninsured = AFWOE048, # Female: 45 to 54 years: No health insurance coverage
+    Female_55_64 = AFWOE049, # Female: 55 to 64 years
+    Female_55_64_Insured = AFWOE050, # Female: 55 to 64 years: With health insurance coverage
+    Female_55_64_Uninsured = AFWOE051, # Female: 55 to 64 years: No health insurance coverage
+    Male_35_44 = AFWOE015, # Male: 35 to 44 years
+    Male_35_44_Insured = AFWOE016, # Male: 35 to 44 years: With health insurance coverage
+    Male_35_44_Uninsured = AFWOE017, # Male: 35 to 44 years: No health insurance coverage
+    Male_45_54 = AFWOE018, # Male: 45 to 54 years
+    Male_45_54_Insured = AFWOE019, # Male: 45 to 54 years: With health insurance coverage
+    Male_45_54_Uninsured = AFWOE020, # Male: 45 to 54 years: No health insurance coverage
+    Male_55_64 = AFWOE021, # Male: 55 to 64 years
+    Male_55_64_Insured = AFWOE022, # Male: 55 to 64 years: With health insurance coverage
+    Male_55_64_Uninsured = AFWOE023, # Male: 55 to 64 years: No health insurance coverage
+    Female_35_44_Error = AFWOM043, # Female: 35 to 44 years (Margin of Error)
+    Female_35_44_Insured_Error = AFWOM044, # Female: 35 to 44 years: With health insurance coverage (Margin of Error)
+    Female_35_44_Uninsured_Error = AFWOM045, # Female: 35 to 44 years: No health insurance coverage (Margin of Error)
+    Female_45_54_Error = AFWOM046, # Female: 45 to 54 years (Margin of Error)
+    Female_45_54_Insured_Error = AFWOM047, # Female: 45 to 54 years: With health insurance coverage (Margin of Error)
+    Female_45_54_Uninsured_Error = AFWOM048, # Female: 45 to 54 years: No health insurance coverage (Margin of Error)
+    Female_55_64_Error = AFWOM049, # Female: 55 to 64 years (Margin of Error)
+    Female_55_64_Insured_Error = AFWOM050, # Female: 55 to 64 years: With health insurance coverage (Margin of Error)
+    Female_55_64_Uninsured_Error = AFWOM051, # Female: 55 to 64 years: No health insurance coverage (Margin of Error)
+    Male_35_44_Error = AFWOM015, # Male: 35 to 44 years (Margin of Error)
+    Male_35_44_Insured_Error = AFWOM016, # Male: 35 to 44 years: With health insurance coverage (Margin of Error)
+    Male_35_44_Uninsured_Error = AFWOM017, # Male: 35 to 44 years: No health insurance coverage (Margin of Error)
+    Male_45_54_Error = AFWOM018, # Male: 45 to 54 years (Margin of Error)
+    Male_45_54_Insured_Error = AFWOM019, # Male: 45 to 54 years: With health insurance coverage (Margin of Error)
+    Male_45_54_Uninsured_Error = AFWOM020, # Male: 45 to 54 years: No health insurance coverage (Margin of Error)
+    Male_55_64_Error = AFWOM021, # Male: 55 to 64 years (Margin of Error)
+    Male_55_64_Insured_Error = AFWOM022, # Male: 55 to 64 years: With health insurance coverage (Margin of Error)
+    Male_55_64_Uninsured_Error = AFWOM023 # Male: 55 to 64 years: No health insurance coverage (Margin of Error)
+  )
+
+final_total_acs2016_uninsured <- selected_uninsured_acs2016data %>%
+  mutate(
+    Total_35_44_Insured = Female_35_44_Insured + Male_35_44_Insured,
+    Total_35_44_Uninsured = Female_35_44_Uninsured + Male_35_44_Uninsured,
+    Total_45_54_Insured = Female_45_54_Insured + Male_45_54_Insured,
+    Total_45_54_Uninsured = Female_45_54_Uninsured + Male_45_54_Uninsured,
+    Total_55_64_Insured = Female_55_64_Insured + Male_55_64_Insured,
+    Total_55_64_Uninsured = Female_55_64_Uninsured + Male_55_64_Uninsured,
+    Total_35_44 = Female_35_44 + Male_35_44,
+    Total_45_54 = Female_45_54 + Male_45_54,
+    Total_55_64 = Female_55_64 + Male_55_64,
+    Total_35_44_Error = sqrt(Female_35_44_Error^2 + Male_35_44_Error^2),
+    Total_35_44_Insured_Error = sqrt(Female_35_44_Insured_Error^2 + Male_35_44_Insured_Error^2),
+    Total_35_44_Uninsured_Error = sqrt(Female_35_44_Uninsured_Error^2 + Male_35_44_Uninsured_Error^2),
+    Total_45_54_Error = sqrt(Female_45_54_Error^2 + Male_45_54_Error^2),
+    Total_45_54_Insured_Error = sqrt(Female_45_54_Insured_Error^2 + Male_45_54_Insured_Error^2),
+    Total_45_54_Uninsured_Error = sqrt(Female_45_54_Uninsured_Error^2 + Male_45_54_Uninsured_Error^2),
+    Total_55_64_Error = sqrt(Female_55_64_Error^2 + Male_55_64_Error^2),
+    Total_55_64_Insured_Error = sqrt(Female_55_64_Insured_Error^2 + Male_55_64_Insured_Error^2),
+    Total_55_64_Uninsured_Error = sqrt(Female_55_64_Uninsured_Error^2 + Male_55_64_Uninsured_Error^2)
+  )
+
+final_total_acs2016_uninsured <- final_total_acs2016_uninsured %>%
+  select(
+    YEAR, # Year of the data
+    STATE, # State of the data
+    Total_35_44,
+    Total_35_44_Insured, # Total insured in age group 35-44
+    Total_35_44_Uninsured, # Total uninsured in age group 35-44
+    Total_45_54,
+    Total_45_54_Insured, # Total insured in age group 45-54
+    Total_45_54_Uninsured, # Total uninsured in age group 45-54
+    Total_55_64,
+    Total_55_64_Insured, # Total insured in age group 55-64
+    Total_55_64_Uninsured, # Total uninsured in age group 55-64
+    Total_35_44_Error, # Total margin of error in age group 35-44
+    Total_35_44_Insured_Error, # Total insured margin of error in age group 35-44
+    Total_35_44_Uninsured_Error, # Total uninsured margin of error in age group 35-44
+    Total_45_54_Error, # Total margin of error in age group 45-54
+    Total_45_54_Insured_Error, # Total insured margin of error in age group 45-54
+    Total_45_54_Uninsured_Error, # Total uninsured margin of error in age group 45-54
+    Total_55_64_Error, # Total margin of error in age group 55-64
+    Total_55_64_Insured_Error, # Total insured margin of error in age group 55-64
+    Total_55_64_Uninsured_Error # Total uninsured margin of error in age group 55-64
+  )
+
+
+
+###2017 
+uninsured_acs2017data <- read_csv("uninsured/acsdata/nhgis0007_csv/nhgis0007_ds232_2017_state.csv")
+
+
+selected_uninsured_acs2017data <- uninsured_acs2017data %>%
+  select(
+    YEAR, # Year of the data
+    STATE, # State of the data
+    Female_35_44 = AHTDE043, # Female: 35 to 44 years
+    Female_35_44_Insured = AHTDE044, # Female: 35 to 44 years: With health insurance coverage
+    Female_35_44_Uninsured = AHTDE045, # Female: 35 to 44 years: No health insurance coverage
+    Female_45_54 = AHTDE046, # Female: 45 to 54 years
+    Female_45_54_Insured = AHTDE047, # Female: 45 to 54 years: With health insurance coverage
+    Female_45_54_Uninsured = AHTDE048, # Female: 45 to 54 years: No health insurance coverage
+    Female_55_64 = AHTDE049, # Female: 55 to 64 years
+    Female_55_64_Insured = AHTDE050, # Female: 55 to 64 years: With health insurance coverage
+    Female_55_64_Uninsured = AHTDE051, # Female: 55 to 64 years: No health insurance coverage
+    Male_35_44 = AHTDE015, # Male: 35 to 44 years
+    Male_35_44_Insured = AHTDE016, # Male: 35 to 44 years: With health insurance coverage
+    Male_35_44_Uninsured = AHTDE017, # Male: 35 to 44 years: No health insurance coverage
+    Male_45_54 = AHTDE018, # Male: 45 to 54 years
+    Male_45_54_Insured = AHTDE019, # Male: 45 to 54 years: With health insurance coverage
+    Male_45_54_Uninsured = AHTDE020, # Male: 45 to 54 years: No health insurance coverage
+    Male_55_64 = AHTDE021, # Male: 55 to 64 years
+    Male_55_64_Insured = AHTDE022, # Male: 55 to 64 years: With health insurance coverage
+    Male_55_64_Uninsured = AHTDE023, # Male: 55 to 64 years: No health insurance coverage
+    Female_35_44_Error = AHTDM043, # Female: 35 to 44 years (Margin of Error)
+    Female_35_44_Insured_Error = AHTDM044, # Female: 35 to 44 years: With health insurance coverage (Margin of Error)
+    Female_35_44_Uninsured_Error = AHTDM045, # Female: 35 to 44 years: No health insurance coverage (Margin of Error)
+    Female_45_54_Error = AHTDM046, # Female: 45 to 54 years (Margin of Error)
+    Female_45_54_Insured_Error = AHTDM047, # Female: 45 to 54 years: With health insurance coverage (Margin of Error)
+    Female_45_54_Uninsured_Error = AHTDM048, # Female: 45 to 54 years: No health insurance coverage (Margin of Error)
+    Female_55_64_Error = AHTDM049, # Female: 55 to 64 years (Margin of Error)
+    Female_55_64_Insured_Error = AHTDM050, # Female: 55 to 64 years: With health insurance coverage (Margin of Error)
+    Female_55_64_Uninsured_Error = AHTDM051, # Female: 55 to 64 years: No health insurance coverage (Margin of Error)
+    Male_35_44_Error = AHTDM015, # Male: 35 to 44 years (Margin of Error)
+    Male_35_44_Insured_Error = AHTDM016, # Male: 35 to 44 years: With health insurance coverage (Margin of Error)
+    Male_35_44_Uninsured_Error = AHTDM017, # Male: 35 to 44 years: No health insurance coverage (Margin of Error)
+    Male_45_54_Error = AHTDM018, # Male: 45 to 54 years (Margin of Error)
+    Male_45_54_Insured_Error = AHTDM019, # Male: 45 to 54 years: With health insurance coverage (Margin of Error)
+    Male_45_54_Uninsured_Error = AHTDM020, # Male: 45 to 54 years: No health insurance coverage (Margin of Error)
+    Male_55_64_Error = AHTDM021, # Male: 55 to 64 years (Margin of Error)
+    Male_55_64_Insured_Error = AHTDM022, # Male: 55 to 64 years: With health insurance coverage (Margin of Error)
+    Male_55_64_Uninsured_Error = AHTDM023 # Male: 55 to 64 years: No health insurance coverage (Margin of Error)
+  )
+
+
+final_total_acs2017_uninsured <- selected_uninsured_acs2017data %>%
+  mutate(
+    Total_35_44_Insured = Female_35_44_Insured + Male_35_44_Insured,
+    Total_35_44_Uninsured = Female_35_44_Uninsured + Male_35_44_Uninsured,
+    Total_45_54_Insured = Female_45_54_Insured + Male_45_54_Insured,
+    Total_45_54_Uninsured = Female_45_54_Uninsured + Male_45_54_Uninsured,
+    Total_55_64_Insured = Female_55_64_Insured + Male_55_64_Insured,
+    Total_55_64_Uninsured = Female_55_64_Uninsured + Male_55_64_Uninsured,
+    Total_35_44 = Female_35_44 + Male_35_44,
+    Total_45_54 = Female_45_54 + Male_45_54,
+    Total_55_64 = Female_55_64 + Male_55_64,
+    Total_35_44_Error = sqrt(Female_35_44_Error^2 + Male_35_44_Error^2),
+    Total_35_44_Insured_Error = sqrt(Female_35_44_Insured_Error^2 + Male_35_44_Insured_Error^2),
+    Total_35_44_Uninsured_Error = sqrt(Female_35_44_Uninsured_Error^2 + Male_35_44_Uninsured_Error^2),
+    Total_45_54_Error = sqrt(Female_45_54_Error^2 + Male_45_54_Error^2),
+    Total_45_54_Insured_Error = sqrt(Female_45_54_Insured_Error^2 + Male_45_54_Insured_Error^2),
+    Total_45_54_Uninsured_Error = sqrt(Female_45_54_Uninsured_Error^2 + Male_45_54_Uninsured_Error^2),
+    Total_55_64_Error = sqrt(Female_55_64_Error^2 + Male_55_64_Error^2),
+    Total_55_64_Insured_Error = sqrt(Female_55_64_Insured_Error^2 + Male_55_64_Insured_Error^2),
+    Total_55_64_Uninsured_Error = sqrt(Female_55_64_Uninsured_Error^2 + Male_55_64_Uninsured_Error^2)
+  )
+
+final_total_acs2017_uninsured <- final_total_acs2017_uninsured %>%
+  select(
+    YEAR, # Year of the data
+    STATE, # State of the data
+    Total_35_44,
+    Total_35_44_Insured, # Total insured in age group 35-44
+    Total_35_44_Uninsured, # Total uninsured in age group 35-44
+    Total_45_54,
+    Total_45_54_Insured, # Total insured in age group 45-54
+    Total_45_54_Uninsured, # Total uninsured in age group 45-54
+    Total_55_64,
+    Total_55_64_Insured, # Total insured in age group 55-64
+    Total_55_64_Uninsured, # Total uninsured in age group 55-64
+    Total_35_44_Error, # Total margin of error in age group 35-44
+    Total_35_44_Insured_Error, # Total insured margin of error in age group 35-44
+    Total_35_44_Uninsured_Error, # Total uninsured margin of error in age group 35-44
+    Total_45_54_Error, # Total margin of error in age group 45-54
+    Total_45_54_Insured_Error, # Total insured margin of error in age group 45-54
+    Total_45_54_Uninsured_Error, # Total uninsured margin of error in age group 45-54
+    Total_55_64_Error, # Total margin of error in age group 55-64
+    Total_55_64_Insured_Error, # Total insured margin of error in age group 55-64
+    Total_55_64_Uninsured_Error # Total uninsured margin of error in age group 55-64
+  )
+
+
+####2018
+uninsured_acs2018data <- read_csv("uninsured/acsdata/nhgis0007_csv/nhgis0007_ds238_2018_state.csv")
+
+selected_uninsured_acs2018data <- uninsured_acs2018data %>%
+  select(
+    YEAR, # Year of the data
+    STATE, # State of the data
+    Female_35_44 = AJQYE043, # Female: 35 to 44 years
+    Female_35_44_Insured = AJQYE044, # Female: 35 to 44 years: With health insurance coverage
+    Female_35_44_Uninsured = AJQYE045, # Female: 35 to 44 years: No health insurance coverage
+    Female_45_54 = AJQYE046, # Female: 45 to 54 years
+    Female_45_54_Insured = AJQYE047, # Female: 45 to 54 years: With health insurance coverage
+    Female_45_54_Uninsured = AJQYE048, # Female: 45 to 54 years: No health insurance coverage
+    Female_55_64 = AJQYE049, # Female: 55 to 64 years
+    Female_55_64_Insured = AJQYE050, # Female: 55 to 64 years: With health insurance coverage
+    Female_55_64_Uninsured = AJQYE051, # Female: 55 to 64 years: No health insurance coverage
+    Male_35_44 = AJQYE015, # Male: 35 to 44 years
+    Male_35_44_Insured = AJQYE016, # Male: 35 to 44 years: With health insurance coverage
+    Male_35_44_Uninsured = AJQYE017, # Male: 35 to 44 years: No health insurance coverage
+    Male_45_54 = AJQYE018, # Male: 45 to 54 years
+    Male_45_54_Insured = AJQYE019, # Male: 45 to 54 years: With health insurance coverage
+    Male_45_54_Uninsured = AJQYE020, # Male: 45 to 54 years: No health insurance coverage
+    Male_55_64 = AJQYE021, # Male: 55 to 64 years
+    Male_55_64_Insured = AJQYE022, # Male: 55 to 64 years: With health insurance coverage
+    Male_55_64_Uninsured = AJQYE023, # Male: 55 to 64 years: No health insurance coverage
+    Female_35_44_Error = AJQYM043, # Female: 35 to 44 years (Margin of Error)
+    Female_35_44_Insured_Error = AJQYM044, # Female: 35 to 44 years: With health insurance coverage (Margin of Error)
+    Female_35_44_Uninsured_Error = AJQYM045, # Female: 35 to 44 years: No health insurance coverage (Margin of Error)
+    Female_45_54_Error = AJQYM046, # Female: 45 to 54 years (Margin of Error)
+    Female_45_54_Insured_Error = AJQYM047, # Female: 45 to 54 years: With health insurance coverage (Margin of Error)
+    Female_45_54_Uninsured_Error = AJQYM048, # Female: 45 to 54 years: No health insurance coverage (Margin of Error)
+    Female_55_64_Error = AJQYM049, # Female: 55 to 64 years (Margin of Error)
+    Female_55_64_Insured_Error = AJQYM050, # Female: 55 to 64 years: With health insurance coverage (Margin of Error)
+    Female_55_64_Uninsured_Error = AJQYM051, # Female: 55 to 64 years: No health insurance coverage (Margin of Error)
+    Male_35_44_Error = AJQYM015, # Male: 35 to 44 years (Margin of Error)
+    Male_35_44_Insured_Error = AJQYM016, # Male: 35 to 44 years: With health insurance coverage (Margin of Error)
+    Male_35_44_Uninsured_Error = AJQYM017, # Male: 35 to 44 years: No health insurance coverage (Margin of Error)
+    Male_45_54_Error = AJQYM018, # Male: 45 to 54 years (Margin of Error)
+    Male_45_54_Insured_Error = AJQYM019, # Male: 45 to 54 years: With health insurance coverage (Margin of Error)
+    Male_45_54_Uninsured_Error = AJQYM020, # Male: 45 to 54 years: No health insurance coverage (Margin of Error)
+    Male_55_64_Error = AJQYM021, # Male: 55 to 64 years (Margin of Error)
+    Male_55_64_Insured_Error = AJQYM022, # Male: 55 to 64 years: With health insurance coverage (Margin of Error)
+    Male_55_64_Uninsured_Error = AJQYM023 # Male: 55 to 64 years: No health insurance coverage (Margin of Error)
+  )
+
+
+final_total_acs2018_uninsured <- selected_uninsured_acs2018data %>%
+  mutate(
+    Total_35_44_Insured = Female_35_44_Insured + Male_35_44_Insured,
+    Total_35_44_Uninsured = Female_35_44_Uninsured + Male_35_44_Uninsured,
+    Total_45_54_Insured = Female_45_54_Insured + Male_45_54_Insured,
+    Total_45_54_Uninsured = Female_45_54_Uninsured + Male_45_54_Uninsured,
+    Total_55_64_Insured = Female_55_64_Insured + Male_55_64_Insured,
+    Total_55_64_Uninsured = Female_55_64_Uninsured + Male_55_64_Uninsured,
+    Total_35_44 = Female_35_44 + Male_35_44,
+    Total_45_54 = Female_45_54 + Male_45_54,
+    Total_55_64 = Female_55_64 + Male_55_64,
+    Total_35_44_Error = sqrt(Female_35_44_Error^2 + Male_35_44_Error^2),
+    Total_35_44_Insured_Error = sqrt(Female_35_44_Insured_Error^2 + Male_35_44_Insured_Error^2),
+    Total_35_44_Uninsured_Error = sqrt(Female_35_44_Uninsured_Error^2 + Male_35_44_Uninsured_Error^2),
+    Total_45_54_Error = sqrt(Female_45_54_Error^2 + Male_45_54_Error^2),
+    Total_45_54_Insured_Error = sqrt(Female_45_54_Insured_Error^2 + Male_45_54_Insured_Error^2),
+    Total_45_54_Uninsured_Error = sqrt(Female_45_54_Uninsured_Error^2 + Male_45_54_Uninsured_Error^2),
+    Total_55_64_Error = sqrt(Female_55_64_Error^2 + Male_55_64_Error^2),
+    Total_55_64_Insured_Error = sqrt(Female_55_64_Insured_Error^2 + Male_55_64_Insured_Error^2),
+    Total_55_64_Uninsured_Error = sqrt(Female_55_64_Uninsured_Error^2 + Male_55_64_Uninsured_Error^2)
+  )
+
+final_total_acs2018_uninsured <- final_total_acs2018_uninsured %>%
+  select(
+    YEAR, # Year of the data
+    STATE, # State of the data
+    Total_35_44,
+    Total_35_44_Insured, # Total insured in age group 35-44
+    Total_35_44_Uninsured, # Total uninsured in age group 35-44
+    Total_45_54,
+    Total_45_54_Insured, # Total insured in age group 45-54
+    Total_45_54_Uninsured, # Total uninsured in age group 45-54
+    Total_55_64,
+    Total_55_64_Insured, # Total insured in age group 55-64
+    Total_55_64_Uninsured, # Total uninsured in age group 55-64
+    Total_35_44_Error, # Total margin of error in age group 35-44
+    Total_35_44_Insured_Error, # Total insured margin of error in age group 35-44
+    Total_35_44_Uninsured_Error, # Total uninsured margin of error in age group 35-44
+    Total_45_54_Error, # Total margin of error in age group 45-54
+    Total_45_54_Insured_Error, # Total insured margin of error in age group 45-54
+    Total_45_54_Uninsured_Error, # Total uninsured margin of error in age group 45-54
+    Total_55_64_Error, # Total margin of error in age group 55-64
+    Total_55_64_Insured_Error, # Total insured margin of error in age group 55-64
+    Total_55_64_Uninsured_Error # Total uninsured margin of error in age group 55-64
+  )
+
+
+
+####2019
+uninsured_acs2019data <- read_csv("uninsured/acsdata/nhgis0007_csv/nhgis0007_ds243_2019_state.csv")
+
+selected_uninsured_acs2019data <- uninsured_acs2019data %>%
+  select(
+    YEAR, # Year of the data
+    STATE, # State of the data
+    Female_35_44 = ALOOE043, # Female: 35 to 44 years
+    Female_35_44_Insured = ALOOE044, # Female: 35 to 44 years: With health insurance coverage
+    Female_35_44_Uninsured = ALOOE045, # Female: 35 to 44 years: No health insurance coverage
+    Female_45_54 = ALOOE046, # Female: 45 to 54 years
+    Female_45_54_Insured = ALOOE047, # Female: 45 to 54 years: With health insurance coverage
+    Female_45_54_Uninsured = ALOOE048, # Female: 45 to 54 years: No health insurance coverage
+    Female_55_64 = ALOOE049, # Female: 55 to 64 years
+    Female_55_64_Insured = ALOOE050, # Female: 55 to 64 years: With health insurance coverage
+    Female_55_64_Uninsured = ALOOE051, # Female: 55 to 64 years: No health insurance coverage
+    Male_35_44 = ALOOE015, # Male: 35 to 44 years
+    Male_35_44_Insured = ALOOE016, # Male: 35 to 44 years: With health insurance coverage
+    Male_35_44_Uninsured = ALOOE017, # Male: 35 to 44 years: No health insurance coverage
+    Male_45_54 = ALOOE018, # Male: 45 to 54 years
+    Male_45_54_Insured = ALOOE019, # Male: 45 to 54 years: With health insurance coverage
+    Male_45_54_Uninsured = ALOOE020, # Male: 45 to 54 years: No health insurance coverage
+    Male_55_64 = ALOOE021, # Male: 55 to 64 years
+    Male_55_64_Insured = ALOOE022, # Male: 55 to 64 years: With health insurance coverage
+    Male_55_64_Uninsured = ALOOE023, # Male: 55 to 64 years: No health insurance coverage
+    Female_35_44_Error = ALOOM043, # Female: 35 to 44 years (Margin of Error)
+    Female_35_44_Insured_Error = ALOOM044, # Female: 35 to 44 years: With health insurance coverage (Margin of Error)
+    Female_35_44_Uninsured_Error = ALOOM045, # Female: 35 to 44 years: No health insurance coverage (Margin of Error)
+    Female_45_54_Error = ALOOM046, # Female: 45 to 54 years (Margin of Error)
+    Female_45_54_Insured_Error = ALOOM047, # Female: 45 to 54 years: With health insurance coverage (Margin of Error)
+    Female_45_54_Uninsured_Error = ALOOM048, # Female: 45 to 54 years: No health insurance coverage (Margin of Error)
+    Female_55_64_Error = ALOOM049, # Female: 55 to 64 years (Margin of Error)
+    Female_55_64_Insured_Error = ALOOM050, # Female: 55 to 64 years: With health insurance coverage (Margin of Error)
+    Female_55_64_Uninsured_Error = ALOOM051, # Female: 55 to 64 years: No health insurance coverage (Margin of Error)
+    Male_35_44_Error = ALOOM015, # Male: 35 to 44 years (Margin of Error)
+    Male_35_44_Insured_Error = ALOOM016, # Male: 35 to 44 years: With health insurance coverage (Margin of Error)
+    Male_35_44_Uninsured_Error = ALOOM017, # Male: 35 to 44 years: No health insurance coverage (Margin of Error)
+    Male_45_54_Error = ALOOM018, # Male: 45 to 54 years (Margin of Error)
+    Male_45_54_Insured_Error = ALOOM019, # Male: 45 to 54 years: With health insurance coverage (Margin of Error)
+    Male_45_54_Uninsured_Error = ALOOM020, # Male: 45 to 54 years: No health insurance coverage (Margin of Error)
+    Male_55_64_Error = ALOOM021, # Male: 55 to 64 years (Margin of Error)
+    Male_55_64_Insured_Error = ALOOM022, # Male: 55 to 64 years: With health insurance coverage (Margin of Error)
+    Male_55_64_Uninsured_Error = ALOOM023 # Male: 55 to 64 years: No health insurance coverage (Margin of Error)
+  )
+
+final_total_acs2019_uninsured <- selected_uninsured_acs2019data %>%
+  mutate(
+    Total_35_44_Insured = Female_35_44_Insured + Male_35_44_Insured,
+    Total_35_44_Uninsured = Female_35_44_Uninsured + Male_35_44_Uninsured,
+    Total_45_54_Insured = Female_45_54_Insured + Male_45_54_Insured,
+    Total_45_54_Uninsured = Female_45_54_Uninsured + Male_45_54_Uninsured,
+    Total_55_64_Insured = Female_55_64_Insured + Male_55_64_Insured,
+    Total_55_64_Uninsured = Female_55_64_Uninsured + Male_55_64_Uninsured,
+    Total_35_44 = Female_35_44 + Male_35_44,
+    Total_45_54 = Female_45_54 + Male_45_54,
+    Total_55_64 = Female_55_64 + Male_55_64,
+    Total_35_44_Error = sqrt(Female_35_44_Error^2 + Male_35_44_Error^2),
+    Total_35_44_Insured_Error = sqrt(Female_35_44_Insured_Error^2 + Male_35_44_Insured_Error^2),
+    Total_35_44_Uninsured_Error = sqrt(Female_35_44_Uninsured_Error^2 + Male_35_44_Uninsured_Error^2),
+    Total_45_54_Error = sqrt(Female_45_54_Error^2 + Male_45_54_Error^2),
+    Total_45_54_Insured_Error = sqrt(Female_45_54_Insured_Error^2 + Male_45_54_Insured_Error^2),
+    Total_45_54_Uninsured_Error = sqrt(Female_45_54_Uninsured_Error^2 + Male_45_54_Uninsured_Error^2),
+    Total_55_64_Error = sqrt(Female_55_64_Error^2 + Male_55_64_Error^2),
+    Total_55_64_Insured_Error = sqrt(Female_55_64_Insured_Error^2 + Male_55_64_Insured_Error^2),
+    Total_55_64_Uninsured_Error = sqrt(Female_55_64_Uninsured_Error^2 + Male_55_64_Uninsured_Error^2)
+  )
+
+final_total_acs2019_uninsured <- final_total_acs2019_uninsured %>%
+  select(
+    YEAR, # Year of the data
+    STATE, # State of the data
+    Total_35_44,
+    Total_35_44_Insured, # Total insured in age group 35-44
+    Total_35_44_Uninsured, # Total uninsured in age group 35-44
+    Total_45_54,
+    Total_45_54_Insured, # Total insured in age group 45-54
+    Total_45_54_Uninsured, # Total uninsured in age group 45-54
+    Total_55_64,
+    Total_55_64_Insured, # Total insured in age group 55-64
+    Total_55_64_Uninsured, # Total uninsured in age group 55-64
+    Total_35_44_Error, # Total margin of error in age group 35-44
+    Total_35_44_Insured_Error, # Total insured margin of error in age group 35-44
+    Total_35_44_Uninsured_Error, # Total uninsured margin of error in age group 35-44
+    Total_45_54_Error, # Total margin of error in age group 45-54
+    Total_45_54_Insured_Error, # Total insured margin of error in age group 45-54
+    Total_45_54_Uninsured_Error, # Total uninsured margin of error in age group 45-54
+    Total_55_64_Error, # Total margin of error in age group 55-64
+    Total_55_64_Insured_Error, # Total insured margin of error in age group 55-64
+    Total_55_64_Uninsured_Error # Total uninsured margin of error in age group 55-64
+  )
+
+
+####2021
+uninsured_acs2021data <- read_csv("uninsured/acsdata/nhgis0007_csv/nhgis0007_ds253_2021_state.csv")
+
+selected_uninsured_acs2021data <- uninsured_acs2021data %>%
+  select(
+    YEAR, # Year of the data
+    STATE, # State of the data
+    Female_35_44 = AOB5E043, # Female: 35 to 44 years
+    Female_35_44_Insured = AOB5E044, # Female: 35 to 44 years: With health insurance coverage
+    Female_35_44_Uninsured = AOB5E045, # Female: 35 to 44 years: No health insurance coverage
+    Female_45_54 = AOB5E046, # Female: 45 to 54 years
+    Female_45_54_Insured = AOB5E047, # Female: 45 to 54 years: With health insurance coverage
+    Female_45_54_Uninsured = AOB5E048, # Female: 45 to 54 years: No health insurance coverage
+    Female_55_64 = AOB5E049, # Female: 55 to 64 years
+    Female_55_64_Insured = AOB5E050, # Female: 55 to 64 years: With health insurance coverage
+    Female_55_64_Uninsured = AOB5E051, # Female: 55 to 64 years: No health insurance coverage
+    Male_35_44 = AOB5E015, # Male: 35 to 44 years
+    Male_35_44_Insured = AOB5E016, # Male: 35 to 44 years: With health insurance coverage
+    Male_35_44_Uninsured = AOB5E017, # Male: 35 to 44 years: No health insurance coverage
+    Male_45_54 = AOB5E018, # Male: 45 to 54 years
+    Male_45_54_Insured = AOB5E019, # Male: 45 to 54 years: With health insurance coverage
+    Male_45_54_Uninsured = AOB5E020, # Male: 45 to 54 years: No health insurance coverage
+    Male_55_64 = AOB5E021, # Male: 55 to 64 years
+    Male_55_64_Insured = AOB5E022, # Male: 55 to 64 years: With health insurance coverage
+    Male_55_64_Uninsured = AOB5E023, # Male: 55 to 64 years: No health insurance coverage
+    Female_35_44_Error = AOB5M043, # Female: 35 to 44 years (Margin of Error)
+    Female_35_44_Insured_Error = AOB5M044, # Female: 35 to 44 years: With health insurance coverage (Margin of Error)
+    Female_35_44_Uninsured_Error = AOB5M045, # Female: 35 to 44 years: No health insurance coverage (Margin of Error)
+    Female_45_54_Error = AOB5M046, # Female: 45 to 54 years (Margin of Error)
+    Female_45_54_Insured_Error = AOB5M047, # Female: 45 to 54 years: With health insurance coverage (Margin of Error)
+    Female_45_54_Uninsured_Error = AOB5M048, # Female: 45 to 54 years: No health insurance coverage (Margin of Error)
+    Female_55_64_Error = AOB5M049, # Female: 55 to 64 years (Margin of Error)
+    Female_55_64_Insured_Error = AOB5M050, # Female: 55 to 64 years: With health insurance coverage (Margin of Error)
+    Female_55_64_Uninsured_Error = AOB5M051, # Female: 55 to 64 years: No health insurance coverage (Margin of Error)
+    Male_35_44_Error = AOB5M015, # Male: 35 to 44 years (Margin of Error)
+    Male_35_44_Insured_Error = AOB5M016, # Male: 35 to 44 years: With health insurance coverage (Margin of Error)
+    Male_35_44_Uninsured_Error = AOB5M017, # Male: 35 to 44 years: No health insurance coverage (Margin of Error)
+    Male_45_54_Error = AOB5M018, # Male: 45 to 54 years (Margin of Error)
+    Male_45_54_Insured_Error = AOB5M019, # Male: 45 to 54 years: With health insurance coverage (Margin of Error)
+    Male_45_54_Uninsured_Error = AOB5M020, # Male: 45 to 54 years: No health insurance coverage (Margin of Error)
+    Male_55_64_Error = AOB5M021, # Male: 55 to 64 years (Margin of Error)
+    Male_55_64_Insured_Error = AOB5M022, # Male: 55 to 64 years: With health insurance coverage (Margin of Error)
+    Male_55_64_Uninsured_Error = AOB5M023 # Male: 55 to 64 years: No health insurance coverage (Margin of Error)
+  )
+
+
+final_total_acs2021_uninsured <- selected_uninsured_acs2021data %>%
+  mutate(
+    Total_35_44_Insured = Female_35_44_Insured + Male_35_44_Insured,
+    Total_35_44_Uninsured = Female_35_44_Uninsured + Male_35_44_Uninsured,
+    Total_45_54_Insured = Female_45_54_Insured + Male_45_54_Insured,
+    Total_45_54_Uninsured = Female_45_54_Uninsured + Male_45_54_Uninsured,
+    Total_55_64_Insured = Female_55_64_Insured + Male_55_64_Insured,
+    Total_55_64_Uninsured = Female_55_64_Uninsured + Male_55_64_Uninsured,
+    Total_35_44 = Female_35_44 + Male_35_44,
+    Total_45_54 = Female_45_54 + Male_45_54,
+    Total_55_64 = Female_55_64 + Male_55_64,
+    Total_35_44_Error = sqrt(Female_35_44_Error^2 + Male_35_44_Error^2),
+    Total_35_44_Insured_Error = sqrt(Female_35_44_Insured_Error^2 + Male_35_44_Insured_Error^2),
+    Total_35_44_Uninsured_Error = sqrt(Female_35_44_Uninsured_Error^2 + Male_35_44_Uninsured_Error^2),
+    Total_45_54_Error = sqrt(Female_45_54_Error^2 + Male_45_54_Error^2),
+    Total_45_54_Insured_Error = sqrt(Female_45_54_Insured_Error^2 + Male_45_54_Insured_Error^2),
+    Total_45_54_Uninsured_Error = sqrt(Female_45_54_Uninsured_Error^2 + Male_45_54_Uninsured_Error^2),
+    Total_55_64_Error = sqrt(Female_55_64_Error^2 + Male_55_64_Error^2),
+    Total_55_64_Insured_Error = sqrt(Female_55_64_Insured_Error^2 + Male_55_64_Insured_Error^2),
+    Total_55_64_Uninsured_Error = sqrt(Female_55_64_Uninsured_Error^2 + Male_55_64_Uninsured_Error^2)
+  )
+
+final_total_acs2021_uninsured <- final_total_acs2021_uninsured %>%
+  select(
+    YEAR, # Year of the data
+    STATE, # State of the data
+    Total_35_44,
+    Total_35_44_Insured, # Total insured in age group 35-44
+    Total_35_44_Uninsured, # Total uninsured in age group 35-44
+    Total_45_54,
+    Total_45_54_Insured, # Total insured in age group 45-54
+    Total_45_54_Uninsured, # Total uninsured in age group 45-54
+    Total_55_64,
+    Total_55_64_Insured, # Total insured in age group 55-64
+    Total_55_64_Uninsured, # Total uninsured in age group 55-64
+    Total_35_44_Error, # Total margin of error in age group 35-44
+    Total_35_44_Insured_Error, # Total insured margin of error in age group 35-44
+    Total_35_44_Uninsured_Error, # Total uninsured margin of error in age group 35-44
+    Total_45_54_Error, # Total margin of error in age group 45-54
+    Total_45_54_Insured_Error, # Total insured margin of error in age group 45-54
+    Total_45_54_Uninsured_Error, # Total uninsured margin of error in age group 45-54
+    Total_55_64_Error, # Total margin of error in age group 55-64
+    Total_55_64_Insured_Error, # Total insured margin of error in age group 55-64
+    Total_55_64_Uninsured_Error # Total uninsured margin of error in age group 55-64
+  )
+
+
+####2022
+uninsured_acs2022data <- read_csv("uninsured/acsdata/nhgis0007_csv/nhgis0010_ds261_2022_state.csv")
+
+selected_uninsured_acs2022data <- uninsured_acs2022data %>%
+  select(
+    YEAR, # Year of the data
+    STATE, # State of the data
+    Female_35_44 = AQHPE043, # Female: 35 to 44 years
+    Female_35_44_Insured = AQHPE044, # Female: 35 to 44 years: With health insurance coverage
+    Female_35_44_Uninsured = AQHPE045, # Female: 35 to 44 years: No health insurance coverage
+    Female_45_54 = AQHPE046, # Female: 45 to 54 years
+    Female_45_54_Insured = AQHPE047, # Female: 45 to 54 years: With health insurance coverage
+    Female_45_54_Uninsured = AQHPE048, # Female: 45 to 54 years: No health insurance coverage
+    Female_55_64 = AQHPE049, # Female: 55 to 64 years
+    Female_55_64_Insured = AQHPE050, # Female: 55 to 64 years: With health insurance coverage
+    Female_55_64_Uninsured = AQHPE051, # Female: 55 to 64 years: No health insurance coverage
+    Male_35_44 = AQHPE015, # Male: 35 to 44 years
+    Male_35_44_Insured = AQHPE016, # Male: 35 to 44 years: With health insurance coverage
+    Male_35_44_Uninsured = AQHPE017, # Male: 35 to 44 years: No health insurance coverage
+    Male_45_54 = AQHPE018, # Male: 45 to 54 years
+    Male_45_54_Insured = AQHPE019, # Male: 45 to 54 years: With health insurance coverage
+    Male_45_54_Uninsured = AQHPE020, # Male: 45 to 54 years: No health insurance coverage
+    Male_55_64 = AQHPE021, # Male: 55 to 64 years
+    Male_55_64_Insured = AQHPE022, # Male: 55 to 64 years: With health insurance coverage
+    Male_55_64_Uninsured = AQHPE023, # Male: 55 to 64 years: No health insurance coverage
+    Female_35_44_Error = AQHPM043, # Female: 35 to 44 years (Margin of Error)
+    Female_35_44_Insured_Error = AQHPM044, # Female: 35 to 44 years: With health insurance coverage (Margin of Error)
+    Female_35_44_Uninsured_Error = AQHPM045, # Female: 35 to 44 years: No health insurance coverage (Margin of Error)
+    Female_45_54_Error = AQHPM046, # Female: 45 to 54 years (Margin of Error)
+    Female_45_54_Insured_Error = AQHPM047, # Female: 45 to 54 years: With health insurance coverage (Margin of Error)
+    Female_45_54_Uninsured_Error = AQHPM048, # Female: 45 to 54 years: No health insurance coverage (Margin of Error)
+    Female_55_64_Error = AQHPM049, # Female: 55 to 64 years (Margin of Error)
+    Female_55_64_Insured_Error = AQHPM050, # Female: 55 to 64 years: With health insurance coverage (Margin of Error)
+    Female_55_64_Uninsured_Error = AQHPM051, # Female: 55 to 64 years: No health insurance coverage (Margin of Error)
+    Male_35_44_Error = AQHPM015, # Male: 35 to 44 years (Margin of Error)
+    Male_35_44_Insured_Error = AQHPM016, # Male: 35 to 44 years: With health insurance coverage (Margin of Error)
+    Male_35_44_Uninsured_Error = AQHPM017, # Male: 35 to 44 years: No health insurance coverage (Margin of Error)
+    Male_45_54_Error = AQHPM018, # Male: 45 to 54 years (Margin of Error)
+    Male_45_54_Insured_Error = AQHPM019, # Male: 45 to 54 years: With health insurance coverage (Margin of Error)
+    Male_45_54_Uninsured_Error = AQHPM020, # Male: 45 to 54 years: No health insurance coverage (Margin of Error)
+    Male_55_64_Error = AQHPM021, # Male: 55 to 64 years (Margin of Error)
+    Male_55_64_Insured_Error = AQHPM022, # Male: 55 to 64 years: With health insurance coverage (Margin of Error)
+    Male_55_64_Uninsured_Error = AQHPM023 # Male: 55 to 64 years: No health insurance coverage (Margin of Error)
+  )
+
+final_total_acs2022_uninsured <- selected_uninsured_acs2022data %>%
+  mutate(
+    Total_35_44_Insured = Female_35_44_Insured + Male_35_44_Insured,
+    Total_35_44_Uninsured = Female_35_44_Uninsured + Male_35_44_Uninsured,
+    Total_45_54_Insured = Female_45_54_Insured + Male_45_54_Insured,
+    Total_45_54_Uninsured = Female_45_54_Uninsured + Male_45_54_Uninsured,
+    Total_55_64_Insured = Female_55_64_Insured + Male_55_64_Insured,
+    Total_55_64_Uninsured = Female_55_64_Uninsured + Male_55_64_Uninsured,
+    Total_35_44 = Female_35_44 + Male_35_44,
+    Total_45_54 = Female_45_54 + Male_45_54,
+    Total_55_64 = Female_55_64 + Male_55_64,
+    Total_35_44_Error = sqrt(Female_35_44_Error^2 + Male_35_44_Error^2),
+    Total_35_44_Insured_Error = sqrt(Female_35_44_Insured_Error^2 + Male_35_44_Insured_Error^2),
+    Total_35_44_Uninsured_Error = sqrt(Female_35_44_Uninsured_Error^2 + Male_35_44_Uninsured_Error^2),
+    Total_45_54_Error = sqrt(Female_45_54_Error^2 + Male_45_54_Error^2),
+    Total_45_54_Insured_Error = sqrt(Female_45_54_Insured_Error^2 + Male_45_54_Insured_Error^2),
+    Total_45_54_Uninsured_Error = sqrt(Female_45_54_Uninsured_Error^2 + Male_45_54_Uninsured_Error^2),
+    Total_55_64_Error = sqrt(Female_55_64_Error^2 + Male_55_64_Error^2),
+    Total_55_64_Insured_Error = sqrt(Female_55_64_Insured_Error^2 + Male_55_64_Insured_Error^2),
+    Total_55_64_Uninsured_Error = sqrt(Female_55_64_Uninsured_Error^2 + Male_55_64_Uninsured_Error^2)
+  )
+
+final_total_acs2022_uninsured <- final_total_acs2022_uninsured %>%
+  select(
+    YEAR, # Year of the data
+    STATE, # State of the data
+    Total_35_44,
+    Total_35_44_Insured, # Total insured in age group 35-44
+    Total_35_44_Uninsured, # Total uninsured in age group 35-44
+    Total_45_54,
+    Total_45_54_Insured, # Total insured in age group 45-54
+    Total_45_54_Uninsured, # Total uninsured in age group 45-54
+    Total_55_64,
+    Total_55_64_Insured, # Total insured in age group 55-64
+    Total_55_64_Uninsured, # Total uninsured in age group 55-64
+    Total_35_44_Error, # Total margin of error in age group 35-44
+    Total_35_44_Insured_Error, # Total insured margin of error in age group 35-44
+    Total_35_44_Uninsured_Error, # Total uninsured margin of error in age group 35-44
+    Total_45_54_Error, # Total margin of error in age group 45-54
+    Total_45_54_Insured_Error, # Total insured margin of error in age group 45-54
+    Total_45_54_Uninsured_Error, # Total uninsured margin of error in age group 45-54
+    Total_55_64_Error, # Total margin of error in age group 55-64
+    Total_55_64_Insured_Error, # Total insured margin of error in age group 55-64
+    Total_55_64_Uninsured_Error # Total uninsured margin of error in age group 55-64
+  )
+
+
+merged_acs_uninsured <- bind_rows(
+  final_total_acs2012_uninsured,
+  final_total_acs2013_uninsured,
+  final_total_acs2014_uninsured,
+  final_total_acs2015_uninsured,
+  final_total_acs2016_uninsured,
+  final_total_acs2017_uninsured,
+  final_total_acs2018_uninsured,
+  final_total_acs2019_uninsured,
+  final_total_acs2021_uninsured,
+  final_total_acs2022_uninsured
+)
+
+
+write_csv(merged_acs_uninsured, "merged_acs_uninsured_2012_2022.csv")
+
+actual_cols <- c("Total_35_44", "Total_35_44_Insured", "Total_35_44_Uninsured",
+                 "Total_45_54", "Total_45_54_Insured", "Total_45_54_Uninsured",
+                 "Total_55_64", "Total_55_64_Insured", "Total_55_64_Uninsured")
+
+error_cols <- c("Total_35_44_Error", "Total_35_44_Insured_Error", "Total_35_44_Uninsured_Error",
+                "Total_45_54_Error", "Total_45_54_Insured_Error", "Total_45_54_Uninsured_Error",
+                "Total_55_64_Error", "Total_55_64_Insured_Error", "Total_55_64_Uninsured_Error")
+
+# Filter the dataset for the years 2019 and 2021
+data_2019_2021 <- final_uninsured_2012_2022 %>%
+  filter(YEAR %in% c(2019, 2021))
+
+
+averages_actual_2020 <- data_2019_2021 %>%
+  group_by(STATE) %>%
+  summarise(across(all_of(actual_cols), ~ mean(.x, na.rm = TRUE)))
+
+
+averages_error_2020 <- data_2019_2021 %>%
+  group_by(STATE) %>%
+  summarise(across(all_of(error_cols), ~ sqrt(mean(.x^2, na.rm = TRUE))))
+
+
+averages_2020 <- bind_cols(averages_actual_2020, averages_error_2020 %>% select(-STATE))
+
+
+averages_2020 <- averages_2020 %>%
+  mutate(YEAR = 2020)
+
+
+final_uninsured_2012_2022 <- bind_rows(final_uninsured_2012_2022, averages_2020) %>%
+  arrange(YEAR, STATE)
+
+
+head(final_uninsured_2012_2022 %>% filter(YEAR == 2020))
+
+#current period uninsured data
+uninsured_acs2022data <- read_csv("nhgis0012_ds261_2022_state.csv")
+
+#child and elderly poverty cleaning
+
+#% of elderly adults below poverty (persons age 65+)
+elderly_poverty_2012 <-read_csv("ACSST1Y2012.S1701-Data.csv")
+
+
+#S1701_C01_005E - Total!!Estimate!!AGE!!65 years and over
+#S1701_C01_005M - Total!!Margin of Error!!AGE!!65 years and over
+#S1701_C02_005E - Below poverty level!!Estimate!!AGE!!65 years and over
+#S1701_C02_005M - Below poverty level!!Margin of Error!!AGE!!65 years and over
+#S1701_C03_005E - Percent below poverty level!!Estimate!!AGE!!65 years and over
+#S1701_C03_005M - Percent below poverty level!!Margin of Error!!AGE!!65 years and over
+#NAME - STATE
+
+selected_elderly_poverty_2012 <- elderly_poverty_2012   %>%
+  select(State = NAME,
+         Pop_total_65_plus = S1701_C01_005E,
+         Pop_total_65_plus_error = S1701_C01_005M,
+         Below_poverty_65_plus = S1701_C02_005E,
+         Below_poverty_65_plus_error = S1701_C02_005M,
+         Percent_Below_poverty_65_plus = S1701_C03_005E,
+         Percent_Below_poverty_65_plus_error = S1701_C03_005M)
+
+selected_elderly_poverty_2012 <- selected_elderly_poverty_2012[-1, ]
+
+#add year column
+selected_elderly_poverty_2012 <- selected_elderly_poverty_2012 %>%
+  mutate(Year = 2012)
+
+View(selected_elderly_poverty_2012) ##DONE AND CLEAN
+
+##2013
+elderly_poverty_2013 <-read_csv("ACSST1Y2013.S1701-Data.csv")
+
+selected_elderly_poverty_2013 <- elderly_poverty_2013   %>%
+  select(State = NAME,
+         Pop_total_65_plus = S1701_C01_005E,
+         Pop_total_65_plus_error = S1701_C01_005M,
+         Below_poverty_65_plus = S1701_C02_005E,
+         Below_poverty_65_plus_error = S1701_C02_005M,
+         Percent_Below_poverty_65_plus = S1701_C03_005E,
+         Percent_Below_poverty_65_plus_error = S1701_C03_005M)
+
+selected_elderly_poverty_2013 <- selected_elderly_poverty_2013[-1, ]
+
+#add year column
+selected_elderly_poverty_2013 <- selected_elderly_poverty_2013 %>%
+  mutate(Year = 2013)
+
+View(selected_elderly_poverty_2013) ##DONE AND CLEAN
+
+##2014
+elderly_poverty_2014 <-read_csv("/ACSST1Y2014.S1701-Data.csv")
+
+#add year column
+selected_elderly_poverty_2014 <- elderly_poverty_2014 %>%
+  mutate(Year = 2014)
+
+selected_elderly_poverty_2014 <- selected_elderly_poverty_2014 %>%
+  select(State = NAME,
+         Year,
+         Pop_total_65_plus = S1701_C01_005E,
+         Pop_total_65_plus_error = S1701_C01_005M,
+         Below_poverty_65_plus = S1701_C02_005E,
+         Below_poverty_65_plus_error = S1701_C02_005M,
+         Percent_Below_poverty_65_plus = S1701_C03_005E,
+         Percent_Below_poverty_65_plus_error = S1701_C03_005M)
+
+selected_elderly_poverty_2014 <- selected_elderly_poverty_2014[-1, ]
+
+View(selected_elderly_poverty_2014) ##DONE AND CLEAN
+
+
+##2015
+elderly_poverty_2015 <-read_csv("ACSST1Y2015.S1701-Data.csv")
+
+#add year column
+selected_elderly_poverty_2015 <- elderly_poverty_2015 %>%
+  mutate(Year = 2015)
+
+selected_elderly_poverty_2015 <- selected_elderly_poverty_2015 %>%
+  select(State = NAME,
+         Year,
+         Pop_total_65_plus = S1701_C01_010E,
+         Pop_total_65_plus_error = S1701_C01_010M,
+         Below_poverty_65_plus = S1701_C02_010E,
+         Below_poverty_65_plus_error = S1701_C02_010M,
+         Percent_Below_poverty_65_plus = S1701_C03_010E,
+         Percent_Below_poverty_65_plus_error = S1701_C03_010M)
+
+selected_elderly_poverty_2015 <- selected_elderly_poverty_2015[-1, ]
+
+View(selected_elderly_poverty_2015) ##DONE AND CLEAN
+
+##2016
+elderly_poverty_2016 <-read_csv("ACSST1Y2016.S1701-Data.csv")
+
+#add year column
+selected_elderly_poverty_2016 <- elderly_poverty_2016 %>%
+  mutate(Year = 2016)
+
+selected_elderly_poverty_2016 <- selected_elderly_poverty_2016 %>%
+  select(State = NAME,
+         Year,
+         Pop_total_65_plus = S1701_C01_010E,
+         Pop_total_65_plus_error = S1701_C01_010M,
+         Below_poverty_65_plus = S1701_C02_010E,
+         Below_poverty_65_plus_error = S1701_C02_010M,
+         Percent_Below_poverty_65_plus = S1701_C03_010E,
+         Percent_Below_poverty_65_plus_error = S1701_C03_010M)
+
+selected_elderly_poverty_2016 <- selected_elderly_poverty_2016[-1, ]
+
+View(selected_elderly_poverty_2016) ##DONE AND CLEAN
+
+##2017
+elderly_poverty_2017 <-read_csv("/ACSST1Y2017.S1701-Data.csv")
+
+#add year column
+selected_elderly_poverty_2017 <- elderly_poverty_2017 %>%
+  mutate(Year = 2017)
+
+selected_elderly_poverty_2017 <- selected_elderly_poverty_2017 %>%
+  select(State = NAME,
+         Year,
+         Pop_total_65_plus = S1701_C01_010E,
+         Pop_total_65_plus_error = S1701_C01_010M,
+         Below_poverty_65_plus = S1701_C02_010E,
+         Below_poverty_65_plus_error = S1701_C02_010M,
+         Percent_Below_poverty_65_plus = S1701_C03_010E,
+         Percent_Below_poverty_65_plus_error = S1701_C03_010M)
+
+selected_elderly_poverty_2017 <- selected_elderly_poverty_2017[-1, ]
+
+View(selected_elderly_poverty_2017) ##DONE AND CLEAN
+
+##2018
+elderly_poverty_2018 <-read_csv("ACSST1Y2018.S1701-Data.csv")
+
+#add year column
+selected_elderly_poverty_2018 <- elderly_poverty_2018 %>%
+  mutate(Year = 2018)
+
+selected_elderly_poverty_2018 <- selected_elderly_poverty_2018 %>%
+  select(State = NAME,
+         Year,
+         Pop_total_65_plus = S1701_C01_010E,
+         Pop_total_65_plus_error = S1701_C01_010M,
+         Below_poverty_65_plus = S1701_C02_010E,
+         Below_poverty_65_plus_error = S1701_C02_010M,
+         Percent_Below_poverty_65_plus = S1701_C03_010E,
+         Percent_Below_poverty_65_plus_error = S1701_C03_010M)
+
+selected_elderly_poverty_2018 <- selected_elderly_poverty_2018[-1, ]
+
+View(selected_elderly_poverty_2018) ##DONE AND CLEAN
+
+##2019
+elderly_poverty_2019 <-read_csv("ACSST1Y2019.S1701-Data.csv")
+
+#add year column
+selected_elderly_poverty_2019 <- elderly_poverty_2019 %>%
+  mutate(Year = 2019)
+
+selected_elderly_poverty_2019 <- selected_elderly_poverty_2019 %>%
+  select(State = NAME,
+         Year,
+         Pop_total_65_plus = S1701_C01_010E,
+         Pop_total_65_plus_error = S1701_C01_010M,
+         Below_poverty_65_plus = S1701_C02_010E,
+         Below_poverty_65_plus_error = S1701_C02_010M,
+         Percent_Below_poverty_65_plus = S1701_C03_010E,
+         Percent_Below_poverty_65_plus_error = S1701_C03_010M)
+
+selected_elderly_poverty_2019 <- selected_elderly_poverty_2019[-1, ]
+
+View(selected_elderly_poverty_2019) ##DONE AND CLEAN
+
+##2021
+elderly_poverty_2021 <-read_csv("ACSST1Y2021.S1701-Data.csv")
+
+#add year column
+selected_elderly_poverty_2021 <- elderly_poverty_2021 %>%
+  mutate(Year = 2021)
+
+selected_elderly_poverty_2021 <- selected_elderly_poverty_2021 %>%
+  select(State = NAME,
+         Year,
+         Pop_total_65_plus = S1701_C01_010E,
+         Pop_total_65_plus_error = S1701_C01_010M,
+         Below_poverty_65_plus = S1701_C02_010E,
+         Below_poverty_65_plus_error = S1701_C02_010M,
+         Percent_Below_poverty_65_plus = S1701_C03_010E,
+         Percent_Below_poverty_65_plus_error = S1701_C03_010M)
+
+selected_elderly_poverty_2021 <- selected_elderly_poverty_2021[-1, ]
+
+View(selected_elderly_poverty_2021) ##DONE AND CLEAN
+
+##2022 current period
+elderly_poverty_2022 <-read_csv("ACSST1Y2022.S1701-Data.csv")
+
+#add year column
+selected_elderly_poverty_2022 <- elderly_poverty_2022 %>%
+  mutate(Year = 2022)
+
+selected_elderly_poverty_2022 <- selected_elderly_poverty_2022 %>%
+  select(State = NAME,
+         Year,
+         Pop_total_65_plus = S1701_C01_010E,
+         Pop_total_65_plus_error = S1701_C01_010M,
+         Below_poverty_65_plus = S1701_C02_010E,
+         Below_poverty_65_plus_error = S1701_C02_010M,
+         Percent_Below_poverty_65_plus = S1701_C03_010E,
+         Percent_Below_poverty_65_plus_error = S1701_C03_010M)
+
+selected_elderly_poverty_2022 <- selected_elderly_poverty_2022[-1, ]
+
+View(selected_elderly_poverty_2022) ##DONE AND CLEAN
+
+
+###MERGE 2012 to 2022 (missing 2020 data)
+merged_selected_elderly_poverty <- selected_elderly_poverty_2021 %>%
+  full_join(selected_elderly_poverty_2022, by = c("State", "Year"))
+
+merged_selected_elderly_poverty <- merged_selected_elderly_poverty %>%
+  mutate(
+    Pop_total_65_plus = coalesce(Pop_total_65_plus.x, Pop_total_65_plus.y),
+    Pop_total_65_plus_error = coalesce(Pop_total_65_plus_error.x, Pop_total_65_plus_error.y),
+    Below_poverty_65_plus = coalesce(Below_poverty_65_plus.x, Below_poverty_65_plus.y),
+    Below_poverty_65_plus_error = coalesce(Below_poverty_65_plus_error.x, Below_poverty_65_plus_error.y),
+    Percent_Below_poverty_65_plus = coalesce(Percent_Below_poverty_65_plus.x, Percent_Below_poverty_65_plus.y),
+    Percent_Below_poverty_65_plus_error = coalesce(Percent_Below_poverty_65_plus_error.x, Percent_Below_poverty_65_plus_error.y)) %>%
+  select(-Pop_total_65_plus.x, -Pop_total_65_plus.y, -Pop_total_65_plus_error.x, -Pop_total_65_plus_error.y, -Below_poverty_65_plus.x, -Below_poverty_65_plus.y, -Below_poverty_65_plus_error.x, -Below_poverty_65_plus_error.y,-Percent_Below_poverty_65_plus.x, -Percent_Below_poverty_65_plus.y, -Percent_Below_poverty_65_plus_error.x, -Percent_Below_poverty_65_plus_error.y)
+
+merged_selected_elderly_poverty <- merged_selected_elderly_poverty %>%
+  full_join(selected_elderly_poverty_2019, by = c("State", "Year"))
+
+merged_selected_elderly_poverty <- merged_selected_elderly_poverty %>%
+  mutate(
+    Pop_total_65_plus = coalesce(Pop_total_65_plus.x, Pop_total_65_plus.y),
+    Pop_total_65_plus_error = coalesce(Pop_total_65_plus_error.x, Pop_total_65_plus_error.y),
+    Below_poverty_65_plus = coalesce(Below_poverty_65_plus.x, Below_poverty_65_plus.y),
+    Below_poverty_65_plus_error = coalesce(Below_poverty_65_plus_error.x, Below_poverty_65_plus_error.y),
+    Percent_Below_poverty_65_plus = coalesce(Percent_Below_poverty_65_plus.x, Percent_Below_poverty_65_plus.y),
+    Percent_Below_poverty_65_plus_error = coalesce(Percent_Below_poverty_65_plus_error.x, Percent_Below_poverty_65_plus_error.y)) %>%
+  select(-Pop_total_65_plus.x, -Pop_total_65_plus.y, -Pop_total_65_plus_error.x, -Pop_total_65_plus_error.y, -Below_poverty_65_plus.x, -Below_poverty_65_plus.y, -Below_poverty_65_plus_error.x, -Below_poverty_65_plus_error.y,-Percent_Below_poverty_65_plus.x, -Percent_Below_poverty_65_plus.y, -Percent_Below_poverty_65_plus_error.x, -Percent_Below_poverty_65_plus_error.y)
+
+merged_selected_elderly_poverty <- merged_selected_elderly_poverty %>%
+  full_join(selected_elderly_poverty_2018, by = c("State", "Year"))
+
+merged_selected_elderly_poverty <- merged_selected_elderly_poverty %>%
+  mutate(
+    Pop_total_65_plus = coalesce(Pop_total_65_plus.x, Pop_total_65_plus.y),
+    Pop_total_65_plus_error = coalesce(Pop_total_65_plus_error.x, Pop_total_65_plus_error.y),
+    Below_poverty_65_plus = coalesce(Below_poverty_65_plus.x, Below_poverty_65_plus.y),
+    Below_poverty_65_plus_error = coalesce(Below_poverty_65_plus_error.x, Below_poverty_65_plus_error.y),
+    Percent_Below_poverty_65_plus = coalesce(Percent_Below_poverty_65_plus.x, Percent_Below_poverty_65_plus.y),
+    Percent_Below_poverty_65_plus_error = coalesce(Percent_Below_poverty_65_plus_error.x, Percent_Below_poverty_65_plus_error.y)) %>%
+  select(-Pop_total_65_plus.x, -Pop_total_65_plus.y, -Pop_total_65_plus_error.x, -Pop_total_65_plus_error.y, -Below_poverty_65_plus.x, -Below_poverty_65_plus.y, -Below_poverty_65_plus_error.x, -Below_poverty_65_plus_error.y,-Percent_Below_poverty_65_plus.x, -Percent_Below_poverty_65_plus.y, -Percent_Below_poverty_65_plus_error.x, -Percent_Below_poverty_65_plus_error.y)
+
+
+merged_selected_elderly_poverty <- merged_selected_elderly_poverty %>%
+  full_join(selected_elderly_poverty_2017, by = c("State", "Year"))
+
+merged_selected_elderly_poverty <- merged_selected_elderly_poverty %>%
+  mutate(
+    Pop_total_65_plus = coalesce(Pop_total_65_plus.x, Pop_total_65_plus.y),
+    Pop_total_65_plus_error = coalesce(Pop_total_65_plus_error.x, Pop_total_65_plus_error.y),
+    Below_poverty_65_plus = coalesce(Below_poverty_65_plus.x, Below_poverty_65_plus.y),
+    Below_poverty_65_plus_error = coalesce(Below_poverty_65_plus_error.x, Below_poverty_65_plus_error.y),
+    Percent_Below_poverty_65_plus = coalesce(Percent_Below_poverty_65_plus.x, Percent_Below_poverty_65_plus.y),
+    Percent_Below_poverty_65_plus_error = coalesce(Percent_Below_poverty_65_plus_error.x, Percent_Below_poverty_65_plus_error.y)) %>%
+  select(-Pop_total_65_plus.x, -Pop_total_65_plus.y, -Pop_total_65_plus_error.x, -Pop_total_65_plus_error.y, -Below_poverty_65_plus.x, -Below_poverty_65_plus.y, -Below_poverty_65_plus_error.x, -Below_poverty_65_plus_error.y,-Percent_Below_poverty_65_plus.x, -Percent_Below_poverty_65_plus.y, -Percent_Below_poverty_65_plus_error.x, -Percent_Below_poverty_65_plus_error.y)
+
+
+merged_selected_elderly_poverty <- merged_selected_elderly_poverty %>%
+  full_join(selected_elderly_poverty_2016, by = c("State", "Year"))
+
+merged_selected_elderly_poverty <- merged_selected_elderly_poverty %>%
+  mutate(
+    Pop_total_65_plus = coalesce(Pop_total_65_plus.x, Pop_total_65_plus.y),
+    Pop_total_65_plus_error = coalesce(Pop_total_65_plus_error.x, Pop_total_65_plus_error.y),
+    Below_poverty_65_plus = coalesce(Below_poverty_65_plus.x, Below_poverty_65_plus.y),
+    Below_poverty_65_plus_error = coalesce(Below_poverty_65_plus_error.x, Below_poverty_65_plus_error.y),
+    Percent_Below_poverty_65_plus = coalesce(Percent_Below_poverty_65_plus.x, Percent_Below_poverty_65_plus.y),
+    Percent_Below_poverty_65_plus_error = coalesce(Percent_Below_poverty_65_plus_error.x, Percent_Below_poverty_65_plus_error.y)) %>%
+  select(-Pop_total_65_plus.x, -Pop_total_65_plus.y, -Pop_total_65_plus_error.x, -Pop_total_65_plus_error.y, -Below_poverty_65_plus.x, -Below_poverty_65_plus.y, -Below_poverty_65_plus_error.x, -Below_poverty_65_plus_error.y,-Percent_Below_poverty_65_plus.x, -Percent_Below_poverty_65_plus.y, -Percent_Below_poverty_65_plus_error.x, -Percent_Below_poverty_65_plus_error.y)
+
+
+
+merged_selected_elderly_poverty <- merged_selected_elderly_poverty %>%
+  full_join(selected_elderly_poverty_2015, by = c("State", "Year"))
+
+merged_selected_elderly_poverty <- merged_selected_elderly_poverty %>%
+  mutate(
+    Pop_total_65_plus = coalesce(Pop_total_65_plus.x, Pop_total_65_plus.y),
+    Pop_total_65_plus_error = coalesce(Pop_total_65_plus_error.x, Pop_total_65_plus_error.y),
+    Below_poverty_65_plus = coalesce(Below_poverty_65_plus.x, Below_poverty_65_plus.y),
+    Below_poverty_65_plus_error = coalesce(Below_poverty_65_plus_error.x, Below_poverty_65_plus_error.y),
+    Percent_Below_poverty_65_plus = coalesce(Percent_Below_poverty_65_plus.x, Percent_Below_poverty_65_plus.y),
+    Percent_Below_poverty_65_plus_error = coalesce(Percent_Below_poverty_65_plus_error.x, Percent_Below_poverty_65_plus_error.y)) %>%
+  select(-Pop_total_65_plus.x, -Pop_total_65_plus.y, -Pop_total_65_plus_error.x, -Pop_total_65_plus_error.y, -Below_poverty_65_plus.x, -Below_poverty_65_plus.y, -Below_poverty_65_plus_error.x, -Below_poverty_65_plus_error.y,-Percent_Below_poverty_65_plus.x, -Percent_Below_poverty_65_plus.y, -Percent_Below_poverty_65_plus_error.x, -Percent_Below_poverty_65_plus_error.y)
+
+merged_selected_elderly_poverty <- merged_selected_elderly_poverty %>%
+  full_join(selected_elderly_poverty_2014, by = c("State", "Year"))
+
+merged_selected_elderly_poverty <- merged_selected_elderly_poverty %>%
+  mutate(
+    Pop_total_65_plus = coalesce(Pop_total_65_plus.x, Pop_total_65_plus.y),
+    Pop_total_65_plus_error = coalesce(Pop_total_65_plus_error.x, Pop_total_65_plus_error.y),
+    Below_poverty_65_plus = coalesce(Below_poverty_65_plus.x, Below_poverty_65_plus.y),
+    Below_poverty_65_plus_error = coalesce(Below_poverty_65_plus_error.x, Below_poverty_65_plus_error.y),
+    Percent_Below_poverty_65_plus = coalesce(Percent_Below_poverty_65_plus.x, Percent_Below_poverty_65_plus.y),
+    Percent_Below_poverty_65_plus_error = coalesce(Percent_Below_poverty_65_plus_error.x, Percent_Below_poverty_65_plus_error.y)) %>%
+  select(-Pop_total_65_plus.x, -Pop_total_65_plus.y, -Pop_total_65_plus_error.x, -Pop_total_65_plus_error.y, -Below_poverty_65_plus.x, -Below_poverty_65_plus.y, -Below_poverty_65_plus_error.x, -Below_poverty_65_plus_error.y,-Percent_Below_poverty_65_plus.x, -Percent_Below_poverty_65_plus.y, -Percent_Below_poverty_65_plus_error.x, -Percent_Below_poverty_65_plus_error.y)
+
+merged_selected_elderly_poverty <- merged_selected_elderly_poverty %>%
+  full_join(selected_elderly_poverty_2013, by = c("State", "Year"))
+
+merged_selected_elderly_poverty <- merged_selected_elderly_poverty %>%
+  mutate(
+    Pop_total_65_plus = coalesce(Pop_total_65_plus.x, Pop_total_65_plus.y),
+    Pop_total_65_plus_error = coalesce(Pop_total_65_plus_error.x, Pop_total_65_plus_error.y),
+    Below_poverty_65_plus = coalesce(Below_poverty_65_plus.x, Below_poverty_65_plus.y),
+    Below_poverty_65_plus_error = coalesce(Below_poverty_65_plus_error.x, Below_poverty_65_plus_error.y),
+    Percent_Below_poverty_65_plus = coalesce(Percent_Below_poverty_65_plus.x, Percent_Below_poverty_65_plus.y),
+    Percent_Below_poverty_65_plus_error = coalesce(Percent_Below_poverty_65_plus_error.x, Percent_Below_poverty_65_plus_error.y)) %>%
+  select(-Pop_total_65_plus.x, -Pop_total_65_plus.y, -Pop_total_65_plus_error.x, -Pop_total_65_plus_error.y, -Below_poverty_65_plus.x, -Below_poverty_65_plus.y, -Below_poverty_65_plus_error.x, -Below_poverty_65_plus_error.y,-Percent_Below_poverty_65_plus.x, -Percent_Below_poverty_65_plus.y, -Percent_Below_poverty_65_plus_error.x, -Percent_Below_poverty_65_plus_error.y)
+
+
+merged_selected_elderly_poverty <- merged_selected_elderly_poverty %>%
+  full_join(selected_elderly_poverty_2012, by = c("State", "Year"))
+
+merged_selected_elderly_poverty <- merged_selected_elderly_poverty %>%
+  mutate(
+    Pop_total_65_plus = coalesce(Pop_total_65_plus.x, Pop_total_65_plus.y),
+    Pop_total_65_plus_error = coalesce(Pop_total_65_plus_error.x, Pop_total_65_plus_error.y),
+    Below_poverty_65_plus = coalesce(Below_poverty_65_plus.x, Below_poverty_65_plus.y),
+    Below_poverty_65_plus_error = coalesce(Below_poverty_65_plus_error.x, Below_poverty_65_plus_error.y),
+    Percent_Below_poverty_65_plus = coalesce(Percent_Below_poverty_65_plus.x, Percent_Below_poverty_65_plus.y),
+    Percent_Below_poverty_65_plus_error = coalesce(Percent_Below_poverty_65_plus_error.x, Percent_Below_poverty_65_plus_error.y)) %>%
+  select(-Pop_total_65_plus.x, -Pop_total_65_plus.y, -Pop_total_65_plus_error.x, -Pop_total_65_plus_error.y, -Below_poverty_65_plus.x, -Below_poverty_65_plus.y, -Below_poverty_65_plus_error.x, -Below_poverty_65_plus_error.y,-Percent_Below_poverty_65_plus.x, -Percent_Below_poverty_65_plus.y, -Percent_Below_poverty_65_plus_error.x, -Percent_Below_poverty_65_plus_error.y)
+
+
+saveRDS(merged_selected_elderly_poverty, file = "final_elderly_poverty_2012_2024_data.rds")
+
+
+
+
+child_poverty_avg_2020 <- selected_filtered_child_poverty_wide %>%
+  filter(Year %in% c("2019", "2021")) %>%
+  group_by(State) %>%
+  summarise(Average_2020_Percent = mean(Percent, na.rm = TRUE)) 
+
+new_data_2020 <- child_poverty_avg_2020 %>%
+  mutate(Year = "2020") %>%
+  select(State, Year, Average_2020_Percent) %>%
+  rename(Percent = Average_2020_Percent)
+
+selected_filtered_child_poverty_wide <- selected_filtered_child_poverty_wide %>%
+  bind_rows(new_data_2020) %>%
+  arrange(State, Year)
+
+final_elderly_poverty_2012_2024_data <- final_elderly_poverty_2012_2024_data %>%
+  mutate(across(all_of(c(actual_cols, error_cols)), as.numeric))
+
+elderly_data_2019_2021 <- final_elderly_poverty_2012_2024_data %>%
+  filter(Year %in% c(2019, 2021))
+
+averages_actual_2020 <- elderly_data_2019_2021 %>%
+  group_by(State) %>%
+  summarise(across(all_of(actual_cols), ~ mean(.x, na.rm = TRUE), .names = "avg_{col}"))
+
+averages_error_2020 <- elderly_data_2019_2021 %>%
+  group_by(State) %>%
+  summarise(across(all_of(error_cols), ~ sqrt(mean(.x^2, na.rm = TRUE)), .names = "avg_{col}"))
+
+averages_2020 <- averages_actual_2020 %>%
+  inner_join(averages_error_2020, by = "State") %>%
+  rename_with(~ gsub("avg_", "", .x), everything())
+
+averages_2020 <- averages_2020 %>%
+  mutate(Year = 2020)
+
+final_elderly_poverty_2012_2024_data <- bind_rows(final_elderly_poverty_2012_2024_data, averages_2020) %>%
+  arrange(Year, State)
+
+head(final_elderly_poverty_2012_2024_data %>% filter(Year == 2020))
+
+# Load the necessary datasets
+state_avg_DW_House_scores <- readRDS(file = "/Users/soroush/Desktop/Harvard PhD/Harvard Research Manuscripts/24_C19 Political Determinants Paper/C19 Elections Paper/Output/state_avg_DW_House_scores.rds")
+state_avg_DW_Senate_scores <- readRDS(file = "/Users/soroush/Desktop/Harvard PhD/Harvard Research Manuscripts/24_C19 Political Determinants Paper/C19 Elections Paper/Output/state_avg_DW_Senate_scores.rds")
+final_state_trifecta_1992_2024 <- readRDS(file = "/Users/soroush/Desktop/Harvard PhD/Harvard Research Manuscripts/24_C19 Political Determinants Paper/C19 Elections Paper/Output/final_state_trifect_1992_2024.rds")
+statelib_2012_to_2020_data <- readRDS(file = "/Users/soroush/Desktop/Harvard PhD/Harvard Research Manuscripts/24_C19 Political Determinants Paper/C19 Elections Paper/Output/flipped_statelib_2012_to_2020_data.rds")
+
+# Ensure correct state names and Year columns in other datasets
+final_uninsured_2012_2022 <- final_uninsured_2012_2022 %>%
+  mutate(State = ifelse(State == "District Of Columbia", "District of Columbia", State))
+
+final_child_poverty_2012_2024$Year <- as.integer(as.character(final_child_poverty_2012_2024$Year))
+final_elderly_poverty_2012_2024_data$Year <- as.integer(as.character(final_elderly_poverty_2012_2024_data$Year))
+final_uninsured_2012_2022$Year <- as.integer(as.character(final_uninsured_2012_2022$Year))
+imr_2012_2024_total_pop$Year <- as.integer(as.character(imr_2012_2024_total_pop$Year))
+total_premature_mortality_2012_2024$Year <- as.integer(as.character(total_premature_mortality_2012_2024$Year))
+
+#create full_trend_data
+full_trend_data <- imr_2012_2024_total_pop %>%
+  left_join(final_child_poverty_2012_2024, by = c("State", "Year")) %>%
+  left_join(final_elderly_poverty_2012_2024_data, by = c("State", "Year")) %>%
+  left_join(final_uninsured_2012_2022, by = c("State", "Year")) %>%
+  left_join(total_premature_mortality_2012_2024, by = c("State", "Year")) %>%
+  select(State,
+         Year,
+         Infant_MR,
+         Age_Adjusted_Premature_Mortality = Age_Adjusted_Rate,
+         Age_Adjusted_Rate_Std_Error,
+         Premature_Mort_Population = Population,
+         Total_Births,
+         Total_Population_35_64 = Total_35_64,
+         Average_Percent_Uninsured_35_64,
+         Percent_Child_Poverty,
+         Percent_Below_poverty_65_plus)
+
+statelib_2012_to_2020_data <- statelib_2012_to_2020_data %>%
+  mutate(Year = as.integer(Year)) %>%
+  group_by(Year) %>%
+  mutate(Tercile = cut(Policy_Score, breaks = quantile(Policy_Score, probs = 0:3 / 3, na.rm = TRUE), labels = c("Bottom", "Middle", "Top"), include.lowest = TRUE))
+
+state_tercile_summary <- statelib_2012_to_2020_data %>%
+  group_by(State) %>%
+  summarize(Consistent_Top = all(Tercile == "Top"), Consistent_Bottom = all(Tercile == "Bottom"), Not_Consistent = !(Consistent_Top | Consistent_Bottom)) %>%
+  mutate(Tercile = case_when(Consistent_Top ~ "Top", Consistent_Bottom ~ "Bottom", Not_Consistent ~ "Not Consistent", TRUE ~ NA_character_))
+
+full_trend_data <- full_trend_data %>%
+  left_join(state_tercile_summary %>% select(State, Tercile), by = "State") %>%
+  rename(State_Lib_Tercile = Tercile)
+
+state_avg_DW_House_scores <- state_avg_DW_House_scores %>%
+  group_by(Year_Congress) %>%
+  mutate(Tercile = cut(avg_overall_tercile_score, breaks = quantile(avg_overall_tercile_score, probs = 0:3 / 3, na.rm = TRUE), labels = c("Bottom", "Middle", "Top"), include.lowest = TRUE))
+
+state_tercile_summary_DW_House <- state_avg_DW_House_scores %>%
+  group_by(State) %>%
+  summarize(Consistent_Top = all(Tercile == "Top"), Consistent_Bottom = all(Tercile == "Bottom"), Not_Consistent = !(Consistent_Top | Consistent_Bottom)) %>%
+  mutate(Tercile = case_when(Consistent_Top ~ "Top", Consistent_Bottom ~ "Bottom", Not_Consistent ~ "Not Consistent", TRUE ~ NA_character_))
+
+merged_data_DW_House <- total_premature_mortality_2012_2024 %>%
+  left_join(state_tercile_summary_DW_House, by = "State") %>%
+  mutate(Tercile = case_when(Consistent_Top ~ "Top", Consistent_Bottom ~ "Bottom", Not_Consistent ~ "Not Consistent", TRUE ~ NA_character_)) %>%
+  filter(!is.na(Tercile)) %>%
+  select(State, Year, DW_House_Tercile = Tercile) %>%
+  mutate(Year = as.integer(Year))
+
+full_trend_data <- full_trend_data %>%
+  left_join(merged_data_DW_House, by = c("State", "Year"))
+
+state_avg_DW_Senate_scores <- state_avg_DW_Senate_scores %>%
+  group_by(Year_Congress) %>%
+  mutate(Tercile = cut(avg_overall_tercile_score, breaks = quantile(avg_overall_tercile_score, probs = 0:3 / 3, na.rm = TRUE), labels = c("Bottom", "Middle", "Top"), include.lowest = TRUE))
+
+state_tercile_summary_DW_Senate <- state_avg_DW_Senate_scores %>%
+  group_by(State) %>%
+  summarize(Consistent_Top = all(Tercile == "Top"), Consistent_Bottom = all(Tercile == "Bottom"), Not_Consistent = !(Consistent_Top | Consistent_Bottom)) %>%
+  mutate(Tercile = case_when(Consistent_Top ~ "Top", Consistent_Bottom ~ "Bottom", Not_Consistent ~ "Not Consistent", TRUE ~ NA_character_))
+
+merged_data_DW_Senate <- total_premature_mortality_2012_2024 %>%
+  left_join(state_tercile_summary_DW_Senate, by = "State") %>%
+  mutate(Tercile = case_when(Consistent_Top ~ "Top", Consistent_Bottom ~ "Bottom", Not_Consistent ~ "Not Consistent", TRUE ~ NA_character_)) %>%
+  filter(!is.na(Tercile)) %>%
+  select(State, Year, DW_Senate_Tercile = Tercile) %>%
+  mutate(Year = as.integer(Year))
+
+full_trend_data <- full_trend_data %>%
+  left_join(merged_data_DW_Senate, by = c("State", "Year"))
+
+filtered_trifecta_data <- final_state_trifecta_1992_2024 %>%
+  filter(Year >= 2012)
+
+analyze_party_consistency <- function(data) {
+  data %>%
+    group_by(State) %>%
+    summarise(All_D = all(Party == "D"), All_R = all(Party == "R"), Mixed = any(Party != "D" & Party != "R") | n_distinct(Party) > 1) %>%
+    mutate(Consistency = case_when(All_D ~ "Democrat", All_R ~ "Republican", TRUE ~ "Mixed")) %>%
+    select(State, Consistency)
+}
+
+party_consistency_summary <- analyze_party_consistency(filtered_trifecta_data)
+
+# Merge the datasets
+full_trend_data <- full_trend_data %>%
+  left_join(party_consistency_summary, by = "State")
+
+# Save the final dataset
+#saveRDS(full_trend_data, file = "/Users/soroush/final_full_trend_data_2012_2024.rds") 
+
+
+```
+
+
+
+#Descriptive analyses
+```{r}
+
+#Current Period
+imr_2022_2024 <- imr_2022_2024 %>%
+  mutate(Deaths = as.numeric(Deaths),
+         Births = as.numeric(Births))
+
+imr_2022_2024 <- imr_2022_2024 %>%
+  filter(!is.na(Deaths) & !is.na(Births))
+
+imr_2022_2024 <- imr_2022_2024 %>%
+  mutate(Infant_MR = (Deaths / Births) * 1000)
+
+
+filtered_imr_2022_to_2024_data <- imr_2022_2024 %>%
+  filter(Year >= 2022 & Year <= 2024) %>%
+  select(Year, Race, Infant_MR)
+
+summary_stats <- filtered_imr_2022_to_2024_data %>%
+  group_by(Race) %>%
+  summarize(
+    Mean = mean(Infant_MR, na.rm = TRUE),
+    SD = sd(Infant_MR, na.rm = TRUE),
+    Median = median(Infant_MR, na.rm = TRUE),
+    Min = min(Infant_MR, na.rm = TRUE),
+    Max = max(Infant_MR, na.rm = TRUE),
+    IQR = IQR(Infant_MR, na.rm = TRUE)
+  ) %>%
+  filter(Race %in% c("Black Non-Hispanic", "White Non-Hispanic", "Hispanic"))
+
+#Trend analysis
+imr_2012_2024_total_pop <- imr_2012_2024_total_pop %>%
+  mutate(IMR = (Total_Deaths / Total_Births) * 1000)
+
+
+periods <- list(
+  "2012-2015" = 2012:2015,
+  "2016-2019" = 2016:2019,
+  "2020-2023" = 2020:2023,
+  "Current: 2022-2024" = 2022:2024
+)
+
+#calculate IMR summary statistics
+summary_stats <- function(data) {
+  mean_val <- mean(data$IMR, na.rm = TRUE)
+  sd_val <- sd(data$IMR, na.rm = TRUE)
+  median_val <- median(data$IMR, na.rm = TRUE)
+  min_val <- min(data$IMR, na.rm = TRUE)
+  max_val <- max(data$IMR, na.rm = TRUE)
+  iqr_val <- IQR(data$IMR, na.rm = TRUE)
+  
+  return(data.frame(
+    Mean = mean_val,
+    SD = sd_val,
+    Median = median_val,
+    Min = min_val,
+    Max = max_val,
+    IQR = iqr_val
+  ))
+}
+
+# summary statistics for each period and for the overall US
+results <- list()
+for (period_name in names(periods)) {
+  period_years <- periods[[period_name]]
+  period_data <- imr_2012_2024_total_pop %>%
+    filter(Year %in% period_years)
+  us_summary <- summary_stats(period_data)
+  state_summary <- period_data %>%
+    group_by(State) %>%
+    summarise(
+      Mean = mean(IMR, na.rm = TRUE),
+      SD = sd(IMR, na.rm = TRUE),
+      Median = median(IMR, na.rm = TRUE),
+      Min = min(IMR, na.rm = TRUE),
+      Max = max(IMR, na.rm = TRUE),
+      IQR = IQR(IMR, na.rm = TRUE)
+    )
+  
+  results[[period_name]] <- list(
+    US = us_summary,
+    States = state_summary
+  )
+}
+
+#premature mortality
+racial_premature_mortality_2022_2024_calculation <- racial_premature_mortality_2022_2024 %>%
+  filter(Year >= 2022 & Year <= 2024) %>%
+  select(Year, Race, Age_Adjusted_Rate)
+
+racial_premature_mortality_2022_2024_calculation  <- racial_premature_mortality_2022_2024 %>%
+  mutate(
+    Age_Adjusted_Rate = as.numeric(Age_Adjusted_Rate)
+  )
+
+summary_stats <- racial_premature_mortality_2022_2024_calculation %>%
+  group_by(Race) %>%
+  summarize(
+    Mean = mean(Age_Adjusted_Rate, na.rm = TRUE),
+    SD = sd(Age_Adjusted_Rate, na.rm = TRUE),
+    Median = median(Age_Adjusted_Rate, na.rm = TRUE),
+    Min = min(Age_Adjusted_Rate, na.rm = TRUE),
+    Max = max(Age_Adjusted_Rate, na.rm = TRUE),
+    IQR = IQR(Age_Adjusted_Rate, na.rm = TRUE)
+  ) %>%
+  filter(Race %in% c("Black Non-Hispanic", "White Non-Hispanic", "Hispanic"))
+
+##MULTIPLY BY 12/5 for 2024
+us_total_premature_mortality_2012_2024 <- us_total_premature_mortality_2012_2024 %>%
+  mutate(
+    Age_Adjusted_Rate = as.numeric(Age_Adjusted_Rate),
+    Age_Adjusted_Lower_95 = as.numeric(Age_Adjusted_Lower_95),
+    Age_Adjusted_Upper_95 = as.numeric(Age_Adjusted_Upper_95)
+  )
+
+# Multiply the values for the year 2024 by 12/5 (first 5 months)
+us_total_premature_mortality_2012_2024 <- us_total_premature_mortality_2012_2024 %>%
+  mutate(
+    Age_Adjusted_Rate = ifelse(Year == 2024, Age_Adjusted_Rate * 12 / 5, Age_Adjusted_Rate),
+    Age_Adjusted_Lower_95 = ifelse(Year == 2024, Age_Adjusted_Lower_95 * 12 / 5, Age_Adjusted_Lower_95),
+    Age_Adjusted_Upper_95 = ifelse(Year == 2024, Age_Adjusted_Upper_95 * 12 / 5, Age_Adjusted_Upper_95)
+  )
+
+summary_stats <- function(data) {
+  mean_val <- mean(data$Age_Adjusted_Rate, na.rm = TRUE)
+  sd_val <- sd(data$Age_Adjusted_Rate, na.rm = TRUE)
+  median_val <- median(data$Age_Adjusted_Rate, na.rm = TRUE)
+  min_val <- min(data$Age_Adjusted_Rate, na.rm = TRUE)
+  max_val <- max(data$Age_Adjusted_Rate, na.rm = TRUE)
+  iqr_val <- IQR(data$Age_Adjusted_Rate, na.rm = TRUE)
+  
+  return(data.frame(
+    Mean = mean_val,
+    SD = sd_val,
+    Median = median_val,
+    Min = min_val,
+    Max = max_val,
+    IQR = iqr_val
+  ))
+}
+
+# summary statistics for each period
+results <- list()
+for (period_name in names(periods)) {
+  period_years <- periods[[period_name]]
+  
+  # Filter data for the current period
+  period_data <- us_total_premature_mortality_2012_2024 %>%
+    filter(Year %in% period_years)
+  
+  # Summary statistics for the period
+  period_summary <- summary_stats(period_data)
+  
+  results[[period_name]] <- period_summary
+}
+
+summed_data <- new_uninsured_acs2022data %>%
+  rowwise() %>%
+  mutate(
+    `35 to 64 years: Total` = sum(AQHPE015, AQHPE018, AQHPE021, AQHPE043, AQHPE046, AQHPE049, na.rm = TRUE),
+    `35 to 64 years: Uninsured` = sum(AQHPE017, AQHPE020, AQHPE023, AQHPE045, AQHPE048, AQHPE051, na.rm = TRUE)
+  ) %>%
+  ungroup() %>%
+  select(State = `NAME_E`, `35 to 64 years: Total`, `35 to 64 years: Uninsured`)
+
+percent_uninsured_2022_data <- summed_data %>%
+  mutate(`35 to 64 years: Percent Uninsured` = (`35 to 64 years: Uninsured` / `35 to 64 years: Total`) * 100)
+
+summary_stats_by_state <- percent_uninsured_data %>%
+  summarise(
+    `35-64 years: Percent Uninsured Mean` = mean(`35 to 64 years: Percent Uninsured`, na.rm = TRUE),
+    `35-64 years: Percent Uninsured SD` = sd(`35 to 64 years: Percent Uninsured`, na.rm = TRUE),
+    `35-64 years: Percent Uninsured Median` = median(`35 to 64 years: Percent Uninsured`, na.rm = TRUE),
+    `35-64 years: Percent Uninsured Min` = min(`35 to 64 years: Percent Uninsured`, na.rm = TRUE),
+    `35-64 years: Percent Uninsured Max` = max(`35 to 64 years: Percent Uninsured`, na.rm = TRUE),
+    `35-64 years: Percent Uninsured IQR` = IQR(`35 to 64 years: Percent Uninsured`, na.rm = TRUE)
+  )
+
+#overall percentage of uninsured individuals for the US for the combined 35-64 age group
+total_summed_data <- percent_uninsured_data %>%
+  summarise(
+    `35 to 64 years: Total` = sum(`35 to 64 years: Total`, na.rm = TRUE),
+    `35 to 64 years: Uninsured` = sum(`35 to 64 years: Uninsured`, na.rm = TRUE)
+  ) %>%
+  mutate(`35 to 64 years: Percent Uninsured` = (`35 to 64 years: Uninsured` / `35 to 64 years: Total`) * 100)
+
+#summary statistics for the % of uninsured individuals for the combined 35-64 age group across all states
+overall_uninsured_summary_stats <- percent_uninsured_data %>%
+  summarise(
+    Mean = mean(`35 to 64 years: Percent Uninsured`, na.rm = TRUE),
+    Median = median(`35 to 64 years: Percent Uninsured`, na.rm = TRUE),
+    SD = sd(`35 to 64 years: Percent Uninsured`, na.rm = TRUE),
+    Min = min(`35 to 64 years: Percent Uninsured`, na.rm = TRUE),
+    Max = max(`35 to 64 years: Percent Uninsured`, na.rm = TRUE),
+    IQR = IQR(`35 to 64 years: Percent Uninsured`, na.rm = TRUE)
+  )
+
+
+#Flu vaccinations 
+#overall summary statistics for the overall percentage of flu shots
+overall_flu_summary_stats <- final_AHR_flu_shot_2022_data %>%
+  summarise(
+    Mean = mean(Estimate, na.rm = TRUE),
+    SD = sd(Estimate, na.rm = TRUE),
+    Median = median(Estimate, na.rm = TRUE),
+    Min = min(Estimate, na.rm = TRUE),
+    Max = max(Estimate, na.rm = TRUE),
+    IQR = IQR(Estimate, na.rm = TRUE)
+  )
+
+#Child vaccines
+
+overall_child_vaccine_summary_stats <- final_child_vaccines_2022_data %>%
+  summarise(
+    Mean = mean(Estimate, na.rm = TRUE),
+    SD = sd(Estimate, na.rm = TRUE),
+    Median = median(Estimate, na.rm = TRUE),
+    Min = min(Estimate, na.rm = TRUE),
+    Max = max(Estimate, na.rm = TRUE),
+    IQR = IQR(Estimate, na.rm = TRUE)
+  )
+
+#65+ covid-19 booster
+
+yearly_nis_adult_covid_BOOSTER_vaccines_2023_2024 <- nis_adult_covid_BOOSTER_vaccines %>%
+  group_by(State, Year) %>%
+  summarize(
+    Estimate = mean(Estimate, na.rm = TRUE),
+    CI_95_Upper = mean(CI_95_Upper, na.rm = TRUE),
+    CI_95_Lower = mean(CI_95_Lower, na.rm = TRUE),
+    Sample_Size = sum(Sample_Size, na.rm = TRUE)
+  )
+
+
+#Food Insecurity
+
+overall_food_insecurity_summary_stats <- food_insecurity %>%
+  summarise(
+    Mean = mean(Estimate, na.rm = TRUE),
+    SD = sd(Estimate, na.rm = TRUE),
+    Median = median(Estimate, na.rm = TRUE),
+    Min = min(Estimate, na.rm = TRUE),
+    Max = max(Estimate, na.rm = TRUE),
+    IQR = IQR(Estimate, na.rm = TRUE)
+  )
+
+#Maternity care deserts
+overall_maternity_care_deserts_summary_stats <- maternity_care_deserts %>%
+  summarise(
+    Mean = mean(Estimate, na.rm = TRUE),
+    SD = sd(Estimate, na.rm = TRUE),
+    Median = median(Estimate, na.rm = TRUE),
+    Min = min(Estimate, na.rm = TRUE),
+    Max = max(Estimate, na.rm = TRUE),
+    IQR = IQR(Estimate, na.rm = TRUE)
+  )
+
+#child poverty
+overall_child_poverty_summary_stats <- final_child_poverty_2012_2024_data %>%
+  summarise(
+    Mean = mean(Estimate, na.rm = TRUE),
+    SD = sd(Estimate, na.rm = TRUE),
+    Median = median(Estimate, na.rm = TRUE),
+    Min = min(Estimate, na.rm = TRUE),
+    Max = max(Estimate, na.rm = TRUE),
+    IQR = IQR(Estimate, na.rm = TRUE)
+  )
+#elderly poverty
+overall_elderly_poverty_summary_stats <- final_elderly_poverty_2012_2024_data %>%
+  summarise(
+    Mean = mean(Estimate, na.rm = TRUE),
+    SD = sd(Estimate, na.rm = TRUE),
+    Median = median(Estimate, na.rm = TRUE),
+    Min = min(Estimate, na.rm = TRUE),
+    Max = max(Estimate, na.rm = TRUE),
+    IQR = IQR(Estimate, na.rm = TRUE)
+  )
+
+#Cook PVI
+
+overall_CookPVI_summary_stats <- CookPVI_2022_state_scores %>%
+  summarise(
+    Mean = mean(Estimate, na.rm = TRUE),
+    SD = sd(Estimate, na.rm = TRUE),
+    Median = median(Estimate, na.rm = TRUE),
+    Min = min(Estimate, na.rm = TRUE),
+    Max = max(Estimate, na.rm = TRUE),
+    IQR = IQR(Estimate, na.rm = TRUE)
+  )
+
+#State Lib
+
+
+overall_statelib_summary_stats <- statelib %>%
+  summarise(
+    Mean = mean(Policy_Score, na.rm = TRUE),
+    SD = sd(Policy_Score, na.rm = TRUE),
+    Median = median(Policy_Score, na.rm = TRUE),
+    Min = min(Policy_Score, na.rm = TRUE),
+    Max = max(Policy_Score, na.rm = TRUE),
+    IQR = IQR(Policy_Score, na.rm = TRUE)
+  )
+
+#ice measures
+calculate_ice_scores <- function(data) {
+  # Calculate overall tercile cut points based on the entire study period
+  overall_tercile1 <- quantile(data$DW_nominate_score, probs = 1/3)
+  overall_tercile2 <- quantile(data$DW_nominate_score, probs = 2/3)
+  
+  data %>%
+    mutate(
+      tercile_score = case_when(
+        DW_nominate_score <= overall_tercile1 ~ -1,
+        DW_nominate_score > overall_tercile1 & DW_nominate_score <= overall_tercile2 ~ 0,
+        DW_nominate_score > overall_tercile2 ~ 1
+      )
+    ) %>%
+    group_by(State, Year) %>%
+    summarise(
+      Ai = sum(tercile_score == 1, na.rm = TRUE),
+      Pi = sum(tercile_score == -1, na.rm = TRUE),
+      Ti = n()
+    ) %>%
+    mutate(
+      ICE = (Ai - Pi) / Ti
+    ) %>%
+    arrange(State, Year)
+}
+
+icescores_House <- calculate_ice_scores(combined_DW_House_data_112_118)
+icescores_Senate <- calculate_ice_scores(combined_DW_Senate_data_112_118)
+
+
+
+#State Trifectas
+#Democratic, Republican, and Divided states
+count_consistent_status <- function(data) {
+  data %>%
+    group_by(`Trifecta Status`) %>%
+    summarise(N = sum(`Number of States`, na.rm = TRUE)) %>%
+    spread(`Trifecta Status`, N, fill = 0)
+}
+
+#counts for each period
+results <- lapply(names(periods), function(period_name) {
+  period_years <- periods[[period_name]]
+  
+
+  period_data <- trifecta_status_data %>%
+    filter(Year %in% period_years)
+  
+  #Democratic, Republican, and Divided states
+  period_summary <- count_consistent_status(period_data)
+  
+  return(period_summary)
+})
+
+
+
+
+```
+
+
+#Cross-sectional analysis
+```{r}
+
+#Standardize the coefficients
+final_cross_sectional_data <- readRDS(file = "/final_cross_sectional_dataset.rds") 
+
+# Standardize 
+standardized_data <- final_cross_sectional_data %>%
+  mutate(
+    Elderly_Poverty_Standardized = scale(Mean_Elderly_Poverty),
+    Child_Poverty_Standardized = scale(Mean_Child_Poverty),
+    Cook_PVI_Standardized = scale(Cook_PVI),
+    DW_Nominate_House_Standardized = scale(DW_Nominate_House),
+    DW_Nominate_Senate_Standardized = scale(DW_Nominate_Senate),
+    Overall_Trifecta_Status = scale(Overall_Trifecta_Status),
+    State_Liberalism_Policy_Score_Standardized = scale(State_Liberalism_Policy_Score)
+  )
+
+standardized_data <- standardized_data %>%
+  mutate(Overall_Trifecta_Status_factor = case_when(
+    Overall_Trifecta_Status <= thresholds[1] + 1e-6 ~ "Consistently Republican",
+    Overall_Trifecta_Status > thresholds[1] + 1e-6 & Overall_Trifecta_Status <= thresholds[2] + 1e-6 ~ "Mixed",
+    Overall_Trifecta_Status > thresholds[2] + 1e-6 ~ "Consistently Democratic"
+  ))
+
+standardized_data <- standardized_data %>%
+  mutate(Overall_Trifecta_Status_factor = factor(Overall_Trifecta_Status_factor, 
+    levels = c("Consistently Republican", "Mixed", "Consistently Democratic")))
+
+
+health_metrics <- c("Mean_Infant_MR","Mean_Infant_MR_Black_Non_Hispanic","Mean_Infant_MR_White_Non_Hispanic","Mean_Infant_MR_Hispanic", "Mean_Age_Adjusted_Rate", "Mean_Uninsured","mean_black_age_adjusted_mortality","mean_white_age_adjusted_mortality", "mean_hispanic_age_adjusted_mortality",
+                    "Mean_Flu_Shot_Estimate", "Mean_Child_Vaccines", "Mean_COVID_Booster",
+                    "Mean_Food_Insecurity", "Mean_Maternity_Care")
+
+exposures <- c("Cook_PVI_Standardized", "DW_Nominate_House_Standardized", "DW_Nominate_Senate_Standardized",
+               "Overall_Trifecta_Status_factor","State_Liberalism_Policy_Score_Standardized")
+
+covariates <- c("Elderly_Poverty_Standardized", "Child_Poverty_Standardized")
+
+
+#Function to run unadjusted results
+run_unadjusted_models <- function(df, health_metrics, exposures, covariates) {
+  results <- list()
+  for (health in health_metrics) {
+    for (exposure in c(exposures, covariates)) {
+      cat("Running model for", health, "with exposure/covariate", exposure, "\n")
+      valid_data <- df[!is.na(df[[health]]) & !is.na(df[[exposure]]), c(health, exposure)]
+      if (length(unique(valid_data[[exposure]])) >= 2) {  
+        model <- lm(as.formula(paste(health, "~", exposure)), data = valid_data)
+        summary_model <- summary(model)
+        conf_int <- confint(model)
+        results[[paste(health, exposure, sep = "_")]] <- list(summary = summary_model, confint = conf_int)
+      } else {
+        cat("Skipping", exposure, "for", health, "due to insufficient levels.\n")
+      }
+    }
+  }
+  return(results)
+}
+
+# Function to run adjusted models
+run_adjusted_models <- function(df, health_metrics, exposures, covariates) {
+  results <- list()
+  for (health in health_metrics) {
+    for (exposure in exposures) {
+      cat("Running adjusted model for", health, "with exposure", exposure, "\n")
+      valid_data <- df[complete.cases(df[c(health, exposure, covariates)]), c(health, exposure, covariates)]
+      if (length(unique(valid_data[[exposure]])) >= 2) {
+        model <- lm(as.formula(paste(health, "~", exposure, "+", paste(covariates, collapse = "+"))), data = valid_data)
+        summary_model <- summary(model)
+        conf_int <- confint(model)
+        results[[paste(health, exposure, "adjusted", sep = "_")]] <- list(summary = summary_model, confint = conf_int)
+      } else {
+        cat("Skipping", exposure, "for", health, "due to insufficient levels.\n")
+      }
+    }
+  }
+  return(results)
+}
+
+unadjusted_results <- run_unadjusted_models(standardized_data, health_metrics, exposures, covariates)
+adjusted_results <- run_adjusted_models(standardized_data, health_metrics, exposures, covariates)
+
+```
+
+#Sensitivity analysis with population weights
+```{r}
+population_estimates <- read_csv(file = "/Population Estimates/NST-EST2023-POP.csv")
+
+
+population_estimates <- population_estimates %>%
+  pivot_longer(cols = starts_with("Year"),
+               names_to = "Year",
+               values_to = "Population",
+               names_repair = "unique") %>%
+  mutate(Year = as.numeric(sub("Year_", "", Year)))
+
+total_population_2020 <- sum(population_estimates$Population[population_estimates$Year == 2020], na.rm = TRUE)
+total_population_2021 <- sum(population_estimates$Population[population_estimates$Year == 2021], na.rm = TRUE)
+total_population_2022 <- sum(population_estimates$Population[population_estimates$Year == 2022], na.rm = TRUE)
+total_population_2023 <- sum(population_estimates$Population[population_estimates$Year == 2023], na.rm = TRUE)
+
+
+percentage_weights <- population_estimates %>%
+  group_by(State) %>%
+  summarise(
+    Avg_2022_2023_perc = mean(c(Population[Year == 2022]/total_population_2022, Population[Year == 2023]/total_population_2023), na.rm = TRUE),
+    Year_2022_perc = sum(Population[Year == 2022] / total_population_2022),
+    Year_2023_perc = sum(Population[Year == 2023] / total_population_2023),
+    Avg_2020_2022_perc = mean(Population[Year %in% c(2020, 2021, 2022)] / (total_population_2020 + total_population_2021 + total_population_2022), na.rm = TRUE),
+    Avg_2021_2022_perc = mean(Population[Year %in% c(2021, 2022)] / total_population_2022, na.rm = TRUE)  # Adjusted for avg proportion
+  ) %>%
+  ungroup()
+
+# Verify the sums of each weight for correct approximation to 1
+cat("Sum of Year 2022 scaled weights:", sum(percentage_weights$Year_2022_perc, na.rm = TRUE), "\n")
+cat("Sum of Year 2023 scaled weights:", sum(percentage_weights$Year_2023_perc, na.rm = TRUE), "\n")
+cat("Sum of Avg 2022-2023 scaled weights:", sum(percentage_weights$Avg_2020_2022_perc, na.rm = TRUE), "\n")
+cat("Sum of Avg 2021-2022 scaled weights:", sum(percentage_weights$Avg_2021_2022_perc, na.rm = TRUE), "\n")
+
+# Read in the final cross-sectional data
+final_cross_sectional_data <- readRDS(file = "final_cross_sectional_dataset.rds")
+
+
+food_insecurity<-readRDS(file = "food_insecurity_2020to2022.rds")
+
+
+food_insecurity <- food_insecurity %>% rename(Mean_Food_Insecurity = Prevalence)
+
+final_cross_sectional_data <- final_cross_sectional_data %>%
+  left_join(food_insecurity %>% select(State, Mean_Food_Insecurity), by = "State") %>%
+  mutate(Mean_Food_Insecurity = coalesce(Mean_Food_Insecurity.y, Mean_Food_Insecurity.x)) %>%
+  select(-Mean_Food_Insecurity.x, -Mean_Food_Insecurity.y)
+
+
+standardized_data <- final_cross_sectional_data %>%
+  mutate(
+    Elderly_Poverty_Standardized = scale(Mean_Elderly_Poverty),
+    Child_Poverty_Standardized = scale(Mean_Child_Poverty),
+    Housing_Insecurity_Standardized = scale(Mean_Housing_Insecurity),
+    Cook_PVI_Standardized = scale(Cook_PVI),
+    DW_Nominate_House_Standardized = scale(DW_Nominate_House),
+    DW_Nominate_Senate_Standardized = if_else(State == "District of Columbia", 1, scale(DW_Nominate_Senate)),
+    Overall_Trifecta_Status = scale(Overall_Trifecta_Status),
+    State_Liberalism_Policy_Score_Standardized = scale(State_Liberalism_Policy_Score)
+  )
+
+
+thresholds <- c(-1.0279469, 0.1957994, 1.4195457)
+
+standardized_data <- standardized_data %>%
+  mutate(Overall_Trifecta_Status_factor = case_when(
+    Overall_Trifecta_Status <= thresholds[1] + 1e-6 ~ "Consistently Republican",
+    Overall_Trifecta_Status > thresholds[1] + 1e-6 & Overall_Trifecta_Status <= thresholds[2] + 1e-6 ~ "Mixed",
+    Overall_Trifecta_Status > thresholds[2] + 1e-6 ~ "Consistently Democratic"
+  )) %>%
+  mutate(Overall_Trifecta_Status_factor = factor(Overall_Trifecta_Status_factor, levels = c("Consistently Republican", "Mixed", "Consistently Democratic")))
+
+standardized_data <- standardized_data %>%
+  left_join(percentage_weights, by = "State")
+
+
+get_weights <- function(health_metric) {
+  switch(health_metric,
+         "Mean_Infant_MR" = "Year_2023_perc",
+         "Mean_Infant_MR_Black_Non_Hispanic" = "Year_2023_perc",
+         "Mean_Infant_MR_White_Non_Hispanic" = "Year_2023_perc",
+         "Mean_Infant_MR_Hispanic" = "Year_2023_perc",
+         "Mean_Age_Adjusted_Rate" = "Year_2023_perc",
+         "Mean_Uninsured" = "Year_2022_perc",
+         "mean_black_age_adjusted_mortality" = "Year_2023_perc",
+         "mean_white_age_adjusted_mortality" = "Year_2023_perc",
+         "mean_hispanic_age_adjusted_mortality" = "Year_2023_perc",
+         "Mean_Flu_Shot_Estimate" = "Year_2022_perc",
+         "Mean_Child_Vaccines" = "Year_2022_perc",
+         "Mean_COVID_Booster" = "Year_2023_perc",
+         "Mean_Food_Insecurity" = "Avg_2020_2022_perc",
+         "Mean_Maternity_Care" = "Avg_2021_2022_perc")
+}
+
+unadjusted_results <- run_unadjusted_models(standardized_data, health_metrics, exposures, covariates)
+adjusted_results <- run_adjusted_models(standardized_data, health_metrics, exposures, covariates) 
+
+###Manual check
+
+expanded_sample_data <- standardized_data %>% filter(!is.na(Mean_Food_Insecurity))
+weights <- expanded_sample_data$Year_2022_perc
+weight_lm <- lm(Mean_Food_Insecurity ~ Overall_Trifecta_Status_factor, data = expanded_sample_data, weights = weights)
+summary(weight_lm)
+
+
+
+```
+
+#Trend and plots
+##PMR
+```{r}
+
+
+#Code for the Premature Mortality plots are shown first, followed by IMR and %uninsured
+
+calculate_mean_se <- function(data, group_vars, value_var) {
+  data %>%
+    group_by(across(all_of(group_vars))) %>%
+    summarize(
+      Mean = mean({{ value_var }}, na.rm = TRUE),
+      SE = sd({{ value_var }}, na.rm = TRUE) / sqrt(n()),
+      .groups = "drop"
+    ) %>%
+    mutate(
+      Lower_CI = Mean - 1.96 * SE,
+      Upper_CI = Mean + 1.96 * SE
+    )
+}
+
+#Premature Mortality 
+
+merged_data <- total_premature_mortality_2012_2024 %>%
+  left_join(state_tercile_summary, by = "State")
+
+average_annual_values_pm <- calculate_mean_se(merged_data, c("Year", "Tercile"), Age_Adjusted_Rate)
+
+state_lib_tercile_premature_mortality <- ggplot(average_annual_values_pm, aes(x = Year, y = Mean, color = Tercile, fill = Tercile)) +
+  geom_line() +
+  geom_ribbon(aes(ymin = Lower_CI, ymax = Upper_CI), alpha = 0.2, color = NA) +
+  labs(
+    title = "Premature Age-Adjusted Mortality Rate by State Liberalism Index Terciles, 2012-2024",
+    x = "",
+    y = "Age-Adjusted Premature Mortality Rate per 100,000"
+  ) +
+  theme_minimal() +
+  scale_y_continuous(limits = c(0, 500)) +
+  scale_x_continuous(limits = c(2012, 2024), breaks = seq(2012, 2024, by = 2)) +
+  theme(
+    plot.title = element_text(size = 7),
+    axis.title.y = element_text(size = 7),
+    axis.text.y = element_text(size = 7),
+    axis.text.x = element_text(size = 5)
+  )
+
+ggsave("final_state_lib_tercile_premature_mortality.pdf", plot = state_lib_tercile_premature_mortality, width = 10, height = 6, bg = "white")
+
+
+#####STATE TRIFECTA TERCILES
+final_state_trifecta_1992_2024 <-readRDS(file = "final_state_trifect_1992_2024.rds")
+
+
+filtered_trifecta_data <- final_state_trifecta_1992_2024 %>%
+  filter(Year >= 2012)
+
+analyze_party_consistency <- function(data) {
+  data %>%
+    group_by(State) %>%
+    summarise(
+      All_D = all(Party == "D"),
+      All_R = all(Party == "R"),
+      Mixed = any(Party != "D" & Party != "R") | n_distinct(Party) > 1
+    ) %>%
+    mutate(
+      Consistency = case_when(
+        All_D ~ "Democrat",
+        All_R ~ "Republican",
+        TRUE ~ "Mixed"
+      )
+    ) %>%
+    select(State, Consistency)
+}
+
+# Analyze party consistency for the study period
+party_consistency_summary <- analyze_party_consistency(filtered_trifecta_data)
+
+merged_data_trifecta <- total_premature_mortality_2012_2024 %>%
+  left_join(party_consistency_summary, by = "State")
+
+
+merged_data_trifecta <- merged_data_trifecta %>%
+  filter(!is.na(Consistency))
+
+average_annual_values_trifecta <- calculate_mean_se(merged_data_trifecta, c("Year", "Consistency"), Age_Adjusted_Rate)
+
+state_trifecta_premature_mortality <- ggplot(average_annual_values_trifecta, aes(x = Year, y = Mean, color = Consistency, fill = Consistency)) +
+  geom_line() +
+  geom_ribbon(aes(ymin = Lower_CI, ymax = Upper_CI), alpha = 0.2, color = NA) +
+  labs(
+    title = "Premature Age-Adjusted Mortality Rate by State Trifecta Consistency, 2012-2024",
+    x = "",
+    y = ""
+  ) +
+  theme_minimal() +
+  scale_color_manual(values = c("Democrat" = "#619CFF", "Republican" = "#F8766D", "Mixed" = "#00BA38")) +
+  scale_fill_manual(values = c("Democrat" = "#619CFF", "Republican" = "#F8766D", "Mixed" = "#00BA38")) +
+  scale_y_continuous(limits = c(0, 500)) +
+  scale_x_continuous(limits = c(2012, 2024), breaks = seq(2012, 2024, by = 2)) +
+  theme(
+    plot.title = element_text(size = 7),
+    axis.title.y = element_text(size = 5),
+    axis.text.y = element_text(size = 5),
+    axis.text.x = element_text(size = 5)
+  )
+
+ggsave("state_trifecta_premature_mortality.png", plot = state_trifecta_premature_mortality, width = 10, height = 6, bg = "white")
+
+
+#
+
+##DW-NOMINATE HOUSE
+
+state_avg_DW_House_scores <- readRDS(file = "/state_avg_DW_House_scores.rds")
+
+
+state_avg_DW_House_scores <- state_avg_DW_House_scores %>%
+  group_by(Year_Congress) %>%
+  mutate(
+    Tercile = cut(
+      avg_overall_tercile_score,
+      breaks = quantile(avg_overall_tercile_score, probs = 0:3 / 3, na.rm = TRUE),
+      labels = c("Bottom", "Middle", "Top"),
+      include.lowest = TRUE
+    )
+  )
+
+state_tercile_summary_DW_House <- state_avg_DW_House_scores %>%
+  group_by(State) %>%
+  summarize(
+    Consistent_Top = all(Tercile == "Top"),
+    Consistent_Bottom = all(Tercile == "Bottom"),
+    Not_Consistent = !(Consistent_Top | Consistent_Bottom)
+  )
+
+merged_data_DW_House <- total_premature_mortality_2012_2024 %>%
+  left_join(state_tercile_summary_DW_House, by = "State")
+
+merged_data_DW_House <- merged_data_DW_House %>%
+  mutate(
+    Tercile = case_when(
+      Consistent_Top ~ "Top",
+      Consistent_Bottom ~ "Bottom",
+      Not_Consistent ~ "Not Consistent",
+      TRUE ~ NA_character_
+    )
+  )
+
+merged_data_DW_House <- merged_data_DW_House %>%
+  filter(!is.na(Tercile))
+
+consistent_colors <- c("Top" = "#619CFF", "Middle" = "#00BA38", "Bottom" = "#F8766D", "Not Consistent" = "#00BA38")
+
+average_annual_values_DW_House <- calculate_mean_se(merged_data_DW_House, c("Year", "Tercile"), Age_Adjusted_Rate)
+
+state_DW_House_tercile_premature_mortality <- ggplot(average_annual_values_DW_House, aes(x = Year, y = Mean, color = Tercile, fill = Tercile)) +
+  geom_line() +
+  geom_ribbon(aes(ymin = Lower_CI, ymax = Upper_CI), alpha = 0.2, color = NA) +
+  labs(
+    title = "Premature Age-Adjusted Mortality Rate by DW-Nominate House Score Terciles, 2012-2024",
+    x = "",
+    y = ""
+  ) +
+  theme_minimal() +
+  scale_color_manual(values = consistent_colors) +
+  scale_fill_manual(values = consistent_colors) +
+  scale_y_continuous(limits = c(0, 500)) +
+  scale_x_continuous(limits = c(2012, 2024), breaks = seq(2012, 2024, by = 2)) +
+  theme(
+    plot.title = element_text(size = 7),
+    axis.title.y = element_text(size = 5),
+    axis.text.y = element_text(size = 5),
+    axis.text.x = element_text(size = 5)
+  )
+
+ggsave("state_DW_House_tercile_premature_mortality.png", plot = state_DW_House_tercile_premature_mortality, width = 10, height = 6, bg = "white") 
+
+
+
+
+#DW-NOMINATE SENATE
+
+state_avg_DW_Senate_scores <- readRDS(file = "state_avg_DW_Senate_scores.rds")
+
+state_avg_DW_Senate_scores <- state_avg_DW_Senate_scores %>%
+  group_by(Year_Congress) %>%
+  mutate(
+    Tercile = cut(
+      avg_overall_tercile_score,
+      breaks = quantile(avg_overall_tercile_score, probs = 0:3 / 3, na.rm = TRUE),
+      labels = c("Bottom", "Middle", "Top"),
+      include.lowest = TRUE
+    )
+  )
+state_tercile_summary_DW_Senate <- state_avg_DW_Senate_scores %>%
+  group_by(State) %>%
+  summarize(
+    Consistent_Top = all(Tercile == "Top"),
+    Consistent_Bottom = all(Tercile == "Bottom"),
+    Not_Consistent = !(Consistent_Top | Consistent_Bottom)
+  )
+
+
+merged_data_DW_Senate <- total_premature_mortality_2012_2024 %>%
+  left_join(state_tercile_summary_DW_Senate, by = "State")
+
+merged_data_DW_Senate <- merged_data_DW_Senate %>%
+  mutate(
+    Tercile = case_when(
+      Consistent_Top ~ "Top",
+      Consistent_Bottom ~ "Bottom",
+      Not_Consistent ~ "Not Consistent",
+      TRUE ~ NA_character_
+    )
+  )
+
+merged_data_DW_Senate <- merged_data_DW_Senate %>%
+  filter(!is.na(Tercile))
+
+average_annual_values_DW_Senate <- calculate_mean_se(merged_data_DW_Senate, c("Year", "Tercile"), Age_Adjusted_Rate)
+
+state_DW_Senate_tercile_premature_mortality <- ggplot(average_annual_values_DW_Senate, aes(x = Year, y = Mean, color = Tercile, fill = Tercile)) +
+  geom_line() +
+  geom_ribbon(aes(ymin = Lower_CI, ymax = Upper_CI), alpha = 0.2, color = NA) +
+  labs(
+    title = "Premature Age-Adjusted Mortality Rate by DW-Nominate Senate Score Terciles, 2012-2024",
+    x = "",
+    y = ""
+  ) +
+  theme_minimal() +
+  scale_color_manual(values = consistent_colors) +
+  scale_fill_manual(values = consistent_colors) +
+  scale_y_continuous(limits = c(0, 500)) +
+  scale_x_continuous(limits = c(2012, 2024), breaks = seq(2012, 2024, by = 2)) +
+  theme(
+    plot.title = element_text(size = 7),
+    axis.title.y = element_text(size = 5),
+    axis.text.y = element_text(size = 5),
+    axis.text.x = element_text(size = 5)
+  )
+
+ggsave("/state_DW_Senate_tercile_premature_mortality.png", plot = state_DW_Senate_tercile_premature_mortality, width = 10, height = 6, bg = "white")
+
+
+
+
+```
+
+
+
+##IMR
+```{r}
+
+###IMR PLOTS###
+
+imr_2012_2024_total_pop<-readRDS(file = "imr_2012_2024_total_pop.rds")
+
+###STATE LIBERALISM INDEX
+
+statelib_2012_to_2020_data <- readRDS(file = "flipped_statelib_2012_to_2020_data.rds")
+
+statelib_2012_to_2020_data <- statelib_2012_to_2020_data %>%
+  group_by(Year) %>%
+  mutate(
+    Tercile = cut(
+      Policy_Score,
+      breaks = quantile(Policy_Score, probs = 0:3 / 3, na.rm = TRUE),
+      labels = c("Bottom", "Middle", "Top"),
+      include.lowest = TRUE
+    )
+  )
+
+state_tercile_summary <- statelib_2012_to_2020_data %>%
+  group_by(State) %>%
+  summarize(
+    Consistent_Top = all(Tercile == "Top"),
+    Consistent_Bottom = all(Tercile == "Bottom"),
+    Not_Consistent = !(Consistent_Top | Consistent_Bottom)
+  )
+
+consistent_top <- state_tercile_summary %>% filter(Consistent_Top)
+consistent_bottom <- state_tercile_summary %>% filter(Consistent_Bottom)
+not_consistent <- state_tercile_summary %>% filter(Not_Consistent)
+
+merged_data <- imr_2012_2024_total_pop %>%
+  left_join(state_tercile_summary, by = "State")
+
+merged_data <- merged_data %>%
+  mutate(
+    Tercile = case_when(
+      Consistent_Top ~ "Top",
+      Consistent_Bottom ~ "Bottom",
+      Not_Consistent ~ "Not Consistent",
+      TRUE ~ NA_character_
+    )
+  )
+
+merged_data <- merged_data %>%
+  filter(!is.na(Tercile))
+
+consistent_colors <- c("Top" = "#619CFF", "Middle" = "#00BA38", "Bottom" = "#F8766D", "Not Consistent" = "#00BA38")
+
+average_annual_values_infant <- calculate_mean_se(merged_data, c("Year", "Tercile"), Infant_MR) 
+
+state_lib_tercile_imr <- ggplot(average_annual_values_infant, aes(x = Year, y = Mean, color = Tercile, fill = Tercile)) +
+  geom_line() +
+  geom_ribbon(aes(ymin = Lower_CI, ymax = Upper_CI), alpha = 0.2, color = NA) +
+  labs(
+    title = "Infant Mortality Rate by State Liberalism Index Terciles, 2012-2024",
+    x = "",
+    y = "Infant Mortality per 1000 births"
+  ) +
+  theme_minimal() +
+  scale_color_manual(values = consistent_colors) +
+  scale_fill_manual(values = consistent_colors) +
+  scale_y_continuous(limits = c(0, 10)) +
+  scale_x_continuous(limits = c(2012, 2024), breaks = seq(2012, 2024, by = 2)) +
+  theme(
+    plot.title = element_text(size = 7),
+    axis.title.y = element_text(size = 7),
+    axis.text.y = element_text(size = 7),
+    axis.text.x = element_text(size = 5)
+  )
+
+# Save the plot
+ggsave("state_lib_tercile_imr.pdf", plot = state_lib_tercile_imr, width = 10, height = 6, bg = "white")
+
+
+###STATE TRIFECTA
+merged_data_trifecta_imr <- imr_2012_2024_total_pop %>%
+  left_join(party_consistency_summary, by = "State") 
+
+
+merged_data_trifecta_imr <- merged_data_trifecta_imr %>%
+  filter(!is.na(Consistency))
+
+
+average_annual_values_trifecta_imr <- calculate_mean_se(merged_data_trifecta_imr, c("Year", "Consistency"), Infant_MR)
+
+state_trifecta_imr_plot <- ggplot(average_annual_values_trifecta_imr, aes(x = Year, y = Mean, color = Consistency, fill = Consistency)) +
+  geom_line() +
+  geom_ribbon(aes(ymin = Lower_CI, ymax = Upper_CI), alpha = 0.2, color = NA) +
+  labs(
+    title = "Infant Mortality Rate by State Trifecta Consistency, 2012-2024",
+    x = "",
+    y = ""
+  ) +
+  theme_minimal() +
+  scale_color_manual(values = c("Democrat" = "#619CFF", "Republican" = "#F8766D", "Mixed" = "#00BA38")) +
+  scale_fill_manual(values = c("Democrat" = "#619CFF", "Republican" = "#F8766D", "Mixed" = "#00BA38")) +
+  scale_y_continuous(limits = c(0, 10)) +
+  scale_x_continuous(limits = c(2012, 2024), breaks = seq(2012, 2024, by = 2)) +
+  theme(
+    plot.title = element_text(size = 7),
+    axis.title.y = element_text(size = 5),
+    axis.text.y = element_text(size = 5),
+    axis.text.x = element_text(size = 5)
+  )
+
+# Save the plot
+ggsave("state_trifecta_imr_plot.pdf", plot = state_trifecta_imr_plot, width = 10, height = 6, bg = "white") 
+
+
+
+######DW-NOMINATE HOUSE
+#infant mortality
+
+state_avg_DW_House_scores <- readRDS(file = "/state_avg_DW_House_scores.rds")
+
+
+state_avg_DW_House_scores <- state_avg_DW_House_scores %>%
+  group_by(Year_Congress) %>%
+  mutate(
+    Tercile = cut(
+      avg_overall_tercile_score,
+      breaks = quantile(avg_overall_tercile_score, probs = 0:3 / 3, na.rm = TRUE),
+      labels = c("Bottom", "Middle", "Top"),
+      include.lowest = TRUE
+    )
+  )
+
+state_tercile_summary_DW_House <- state_avg_DW_House_scores %>%
+  group_by(State) %>%
+  summarize(
+    Consistent_Top = all(Tercile == "Top"),
+    Consistent_Bottom = all(Tercile == "Bottom"),
+    Not_Consistent = !(Consistent_Top | Consistent_Bottom)
+  )
+
+merged_data_DW_House <- imr_2012_2024_total_pop %>%
+  left_join(state_tercile_summary_DW_House, by = "State")
+
+merged_data_DW_House <- merged_data_DW_House %>%
+  mutate(
+    Tercile = case_when(
+      Consistent_Top ~ "Top",
+      Consistent_Bottom ~ "Bottom",
+      Not_Consistent ~ "Not Consistent",
+      TRUE ~ NA_character_
+    )
+  )
+
+merged_data_DW_House <- merged_data_DW_House %>%
+  filter(!is.na(Tercile))
+
+average_annual_values_DW_House <- calculate_mean_se(merged_data_DW_House, c("Year", "Tercile"), Infant_MR)
+
+consistent_colors <- c("Top" = "#619CFF", "Middle" = "#00BA38", "Bottom" = "#F8766D", "Not Consistent" = "#00BA38")
+
+state_DW_House_tercile_imr <- ggplot(average_annual_values_DW_House, aes(x = Year, y = Mean, color = Tercile, fill = Tercile)) +
+  geom_line() +
+  geom_ribbon(aes(ymin = Lower_CI, ymax = Upper_CI), alpha = 0.2, color = NA) +
+  labs(
+    title = "Infant Mortality Rate by DW-Nominate House Score Terciles, 2012-2024",
+    x = "",
+    y = ""
+  ) +
+  theme_minimal() +
+  scale_color_manual(values = consistent_colors) +
+  scale_fill_manual(values = consistent_colors) +
+  scale_y_continuous(limits = c(0, 10)) +
+  scale_x_continuous(limits = c(2012, 2024), breaks = seq(2012, 2024, by = 2)) +
+  theme(
+    plot.title = element_text(size = 7),
+    axis.title.y = element_text(size = 5),
+    axis.text.y = element_text(size = 5),
+    axis.text.x = element_text(size = 5)
+  )
+
+
+ggsave("state_DW_House_tercile_imr.pdf", plot = state_DW_House_tercile_imr, width = 10, height = 6, bg = "white")
+
+####DW NOMINATE SENATE
+
+state_avg_DW_Senate_scores <- readRDS(file = "state_avg_DW_Senate_scores.rds")
+
+state_avg_DW_Senate_scores <- state_avg_DW_Senate_scores %>%
+  group_by(Year_Congress) %>%
+  mutate(
+    Tercile = cut(
+      avg_overall_tercile_score,
+      breaks = quantile(avg_overall_tercile_score, probs = 0:3 / 3, na.rm = TRUE),
+      labels = c("Bottom", "Middle", "Top"),
+      include.lowest = TRUE
+    )
+  )
+
+
+state_tercile_summary_DW_Senate <- state_avg_DW_Senate_scores %>%
+  group_by(State) %>%
+  summarize(
+    Consistent_Top = all(Tercile == "Top"),
+    Consistent_Bottom = all(Tercile == "Bottom"),
+    Not_Consistent = !(Consistent_Top | Consistent_Bottom)
+  )
+
+
+merged_data_DW_Senate <- imr_2012_2024_total_pop %>%
+  left_join(state_tercile_summary_DW_Senate, by = "State")
+
+merged_data_DW_Senate <- merged_data_DW_Senate %>%
+  mutate(
+    Tercile = case_when(
+      Consistent_Top ~ "Top",
+      Consistent_Bottom ~ "Bottom",
+      Not_Consistent ~ "Not Consistent",
+      TRUE ~ NA_character_
+    )
+  )
+
+merged_data_DW_Senate <- merged_data_DW_Senate %>%
+  filter(!is.na(Tercile))
+
+average_annual_values_DW_Senate <- calculate_mean_se(merged_data_DW_Senate, c("Year", "Tercile"), Infant_MR)
+
+consistent_colors <- c("Top" = "#619CFF", "Middle" = "#00BA38", "Bottom" = "#F8766D", "Not Consistent" = "#00BA38")
+
+# Create the plot with confidence intervals
+state_DW_Senate_tercile_imr <- ggplot(average_annual_values_DW_Senate, aes(x = Year, y = Mean, color = Tercile, fill = Tercile)) +
+  geom_line() +
+  geom_ribbon(aes(ymin = Lower_CI, ymax = Upper_CI), alpha = 0.2, color = NA) +
+  labs(
+    title = "Infant Mortality Rate by DW-Nominate Senate Score Terciles, 2012-2024",
+    x = "",
+    y = ""
+  ) +
+  theme_minimal() +
+  scale_color_manual(values = consistent_colors) +
+  scale_fill_manual(values = consistent_colors) +
+  scale_y_continuous(limits = c(0, 10)) +
+  scale_x_continuous(limits = c(2012, 2024), breaks = seq(2012, 2024, by = 2)) +
+  theme(
+    plot.title = element_text(size = 7),
+    axis.title.y = element_text(size = 5),
+    axis.text.y = element_text(size = 5),
+    axis.text.x = element_text(size = 5)
+  )
+
+# Save the plot
+ggsave("/IMR plots/state_DW_Senate_tercile_imr.pdf", plot = state_DW_Senate_tercile_imr, width = 10, height = 6, bg = "white")
+
+```
+
+##% Uninsured
+```{r}
+###TREND data is across 3 age groups 35-44, 45-54, 55-64
+final_uninsured_2012_2022 <- readRDS(file = "final_uninsured_2012_2022_data.rds")
+
+###STATE LIBERALISM
+
+# Merge the tercile summary with the uninsured data
+merged_data <- final_uninsured_2012_2022 %>%
+  left_join(state_tercile_summary, by = "State")
+
+merged_data <- merged_data %>%
+  filter(!is.na(Tercile))
+
+average_annual_values <- calculate_mean_se(merged_data, c("Year", "Tercile"), Average_Percent_Uninsured_35_64)
+
+consistent_colors <- c("Top" = "#619CFF", "Middle" = "#00BA38", "Bottom" = "#F8766D", "Not Consistent" = "#00BA38")
+
+state_lib_tercile_uninsured <- ggplot(average_annual_values, aes(x = Year, y = Mean, color = Tercile, fill = Tercile)) +
+  geom_line() +
+  geom_ribbon(aes(ymin = Lower_CI, ymax = Upper_CI), alpha = 0.2, color = NA) +
+  labs(
+    title = "% Uninsured by State Liberalism Index Terciles, 2012-2022",
+    x = "",
+    y = "Average Percent Uninsured"
+  ) +
+  theme_minimal() +
+  scale_color_manual(values = consistent_colors) +
+  scale_fill_manual(values = consistent_colors) +
+  scale_y_continuous(limits = c(0, 25)) +
+  scale_x_continuous(limits = c(2012, 2022), breaks = seq(2012, 2022, by = 2)) +
+  theme(
+    plot.title = element_text(size = 7),
+    axis.title.y = element_text(size = 7),
+    axis.text.y = element_text(size = 7),
+    axis.text.x = element_text(size = 5)
+  )
+
+ggsave("state_lib_tercile_uninsured.pdf", plot = state_lib_tercile_uninsured, width = 10, height = 6, bg = "white")
+
+graphics.off()
+
+####STATE TRIFECTA
+
+merged_data_trifecta <- final_uninsured_2012_2022 %>%
+  left_join(party_consistency_summary, by = "State")
+
+merged_data_trifecta <- merged_data_trifecta %>%
+  filter(!is.na(Consistency))
+
+average_annual_values_trifecta <- calculate_mean_se(merged_data_trifecta, c("Year", "Consistency"), Average_Percent_Uninsured_35_64)
+
+consistent_colors <- c("Democrat" = "#619CFF", "Republican" = "#F8766D", "Mixed" = "#00BA38")
+
+state_trifecta_uninsured_plot <- ggplot(average_annual_values_trifecta, aes(x = Year, y = Mean, color = Consistency, fill = Consistency)) +
+  geom_line() +
+  geom_ribbon(aes(ymin = Lower_CI, ymax = Upper_CI), alpha = 0.2, color = NA) +
+  labs(
+    title = "% Uninsured by State Trifecta Consistency, 2012-2022",
+    x = "",
+    y = ""
+  ) +
+  theme_minimal() +
+  scale_color_manual(values = consistent_colors) +
+  scale_fill_manual(values = consistent_colors) +
+  scale_y_continuous(limits = c(0, 25)) +
+  scale_x_continuous(limits = c(2012, 2022), breaks = seq(2012, 2022, by = 2)) +
+  theme(
+    plot.title = element_text(size = 7),
+    axis.title.y = element_text(size = 7),
+    axis.text.y = element_text(size = 7),
+    axis.text.x = element_text(size = 5)
+  )
+
+ggsave("state_trifecta_uninsured_plot.pdf", plot = state_trifecta_uninsured_plot, width = 10, height = 6, bg = "white")
+ 
+
+graphics.off()
+
+###DW NOMINATE HOUSE
+
+merged_data_DW_House <- final_uninsured_2012_2022 %>%
+  left_join(state_tercile_summary_DW_House, by = "State")
+
+merged_data_DW_House <- merged_data_DW_House %>%
+  filter(!is.na(Tercile))
+
+average_annual_values_DW_House <- calculate_mean_se(merged_data_DW_House, c("Year", "Tercile"), Average_Percent_Uninsured_35_64)
+
+consistent_colors <- c("Top" = "#619CFF", "Bottom" = "#F8766D", "Not Consistent" = "#00BA38")
+
+state_DW_House_tercile_uninsured <- ggplot(average_annual_values_DW_House, aes(x = Year, y = Mean, color = Tercile, fill = Tercile)) +
+  geom_line() +
+  geom_ribbon(aes(ymin = Lower_CI, ymax = Upper_CI), alpha = 0.2, color = NA) +
+  labs(
+    title = "% Uninsured by DW-Nominate House Score Terciles, 2012-2022",
+    x = "",
+    y = ""
+  ) +
+  theme_minimal() +
+  scale_color_manual(values = consistent_colors) +
+  scale_fill_manual(values = consistent_colors) +
+  scale_y_continuous(limits = c(0, 25)) +
+  scale_x_continuous(limits = c(2012, 2022), breaks = seq(2012, 2022, by = 2)) +
+  theme(
+    plot.title = element_text(size = 7),
+    axis.title.y = element_text(size = 7),
+    axis.text.y = element_text(size = 7),
+    axis.text.x = element_text(size = 5) # Make sure the text is not angled and remains horizontal
+  )
+
+
+ggsave("state_DW_House_tercile_uninsured.pdf", plot = state_DW_House_tercile_uninsured, width = 10, height = 6, bg = "white")
+
+graphics.off()
+
+###SENATE
+
+# Merge the tercile summary with the uninsured data
+merged_data_DW_Senate <- final_uninsured_2012_2022 %>%
+  left_join(state_tercile_summary_DW_Senate, by = "State")
+
+average_annual_values_DW_Senate <- calculate_mean_se(merged_data_DW_Senate, c("Year", "Tercile"), Average_Percent_Uninsured_35_64)
+
+consistent_colors <- c("Top" = "#619CFF", "Bottom" = "#F8766D", "Not Consistent" = "#00BA38")
+
+state_DW_Senate_tercile_uninsured <- ggplot(average_annual_values_DW_Senate, aes(x = Year, y = Mean, color = Tercile, fill = Tercile)) +
+  geom_line() +
+  geom_ribbon(aes(ymin = Lower_CI, ymax = Upper_CI), alpha = 0.2, color = NA) +
+  labs(
+    title = "% Uninsured by State DW-Nominate Senate Score Terciles, 2012-2022",
+    x = "",
+    y = ""
+  ) +
+  theme_minimal() +
+  scale_color_manual(values = consistent_colors) +
+  scale_fill_manual(values = consistent_colors) +
+  scale_y_continuous(limits = c(0, 25)) +
+  scale_x_continuous(limits = c(2012, 2022), breaks = seq(2012, 2022, by = 2)) +
+  theme(
+    plot.title = element_text(size = 7),
+    axis.title.y = element_text(size = 7),
+    axis.text.y = element_text(size = 7),
+    axis.text.x = element_text(size = 5) # Ensure the text is horizontal
+  )
+
+
+ggsave("state_DW_Senate_tercile_uninsured.pdf", plot = state_DW_Senate_tercile_uninsured, width = 10, height = 6, bg = "white")
+
+```
+
+##Disaggregated Plots by State
+```{r}
+state_lib_top_state_premature_mortality <- ggplot(top_states_data, aes(x = Year, y = Age_Adjusted_Rate, color = State)) +
+  geom_line() +
+  labs(title = "Consistently Top Tercile States of the State Liberalism Index, 2012-2024",
+       x = "", y = "") +
+  theme_minimal() +
+  scale_y_continuous(limits = c(0, 550)) +
+  scale_x_continuous(limits = c(2012, 2024), breaks = seq(2012, 2024, by = 2)) + 
+  theme(
+    plot.title = element_text(size = 6, hjust = 0.5, lineheight = 0.9, margin = margin(b = 10)),
+    axis.title.y = element_text(size = 5),
+    axis.text.y = element_text(size = 5),
+    axis.text.x = element_text(size = 5, hjust = 1),
+    plot.title.position = "plot"
+  )
+
+state_lib_bottom_state_premature_mortality<-ggplot(bottom_states_data, aes(x = Year, y = Age_Adjusted_Rate, color = State)) +
+  geom_line() +
+  labs(title = "Consistently Bottom Tercile States of the State Liberalism Index, 2012-2024",
+       x = "", y = "") +
+  theme_minimal() +
+  scale_y_continuous(limits = c(0, 550)) +
+  scale_x_continuous(limits = c(2012, 2024), breaks = seq(2012, 2024, by = 2)) + 
+  theme(
+    plot.title = element_text(size = 6, hjust = 0.5, lineheight = 0.9, margin = margin(b = 10)),
+    axis.title.y = element_text(size = 5),
+    axis.text.y = element_text(size = 5),
+    axis.text.x = element_text(size = 5, hjust = 1),
+    plot.title.position = "plot"
+  )
+
+state_lib_not_consistent_state_premature_mortality<-ggplot(not_consistent_states_data, aes(x = Year, y = Age_Adjusted_Rate, color = State)) +
+  geom_line() +
+  labs(title = "Not Consistent States of the State Liberalism Index, 2012-2024",
+       x = "", y = "") +
+  theme_minimal() +
+  scale_y_continuous(limits = c(0, 550)) +
+  scale_x_continuous(limits = c(2012, 2024), breaks = seq(2012, 2024, by = 2)) + 
+  theme(
+    plot.title = element_text(size = 6, hjust = 0.5, lineheight = 0.9, margin = margin(b = 10)),
+    axis.title.y = element_text(size = 5),
+    axis.text.y = element_text(size = 5),
+    axis.text.x = element_text(size = 5, hjust = 1),
+    plot.title.position = "plot"
+  )
+
+state_trifecta_democrat_premature_mortality <- ggplot(democrat_states_data, aes(x = Year, y = Age_Adjusted_Rate, color = State)) +
+  geom_line() +
+  labs(
+    title = "Consistently Democrat Trifecta States, 2012-2024",
+    x = "",
+    y = ""
+  ) +
+  theme_minimal() +
+  scale_y_continuous(limits = c(0, 550)) +
+  scale_x_continuous(limits = c(2012, 2024), breaks = seq(2012, 2024, by = 2)) + 
+  theme(
+    plot.title = element_text(size = 6, hjust = 0.5, lineheight = 0.9, margin = margin(b = 10)),
+    axis.title.y = element_text(size = 5),
+    axis.text.y = element_text(size = 5),
+    axis.text.x = element_text(size = 5, hjust = 1),
+    plot.title.position = "plot"
+  )
+
+state_trifecta_republican_premature_mortality <- ggplot(republican_states_data, aes(x = Year, y = Age_Adjusted_Rate, color = State)) +
+  geom_line() +
+  labs(
+    title = "Consistently Republican Trifecta States, 2012-2024",
+    x = "",
+    y = ""
+  ) +
+  theme_minimal() +
+  scale_y_continuous(limits = c(0, 550)) +
+  scale_x_continuous(limits = c(2012, 2024), breaks = seq(2012, 2024, by = 2)) + 
+  theme(
+    plot.title = element_text(size = 6, hjust = 0.5, lineheight = 0.9, margin = margin(b = 10)),
+    axis.title.y = element_text(size = 5),
+    axis.text.y = element_text(size = 5),
+    axis.text.x = element_text(size = 5, hjust = 1),
+    plot.title.position = "plot"
+  )
+
+state_trifecta_mixed_premature_mortality <- ggplot(mixed_states_data, aes(x = Year, y = Age_Adjusted_Rate, color = State)) +
+  geom_line() +
+  labs(
+    title = "Mixed Trifecta States, 2012-2024",
+    x = "",
+    y = ""
+  ) +
+  theme_minimal() +
+  scale_y_continuous(limits = c(0, 550)) +
+  scale_x_continuous(limits = c(2012, 2024), breaks = seq(2012, 2024, by = 2)) + 
+  theme(
+    plot.title = element_text(size = 6, hjust = 0.5, lineheight = 0.9, margin = margin(b = 10)),
+    axis.title.y = element_text(size = 5),
+    axis.text.y = element_text(size = 5),
+    axis.text.x = element_text(size = 5, hjust = 1),
+    plot.title.position = "plot"
+  )
+
+plot_top_DW_House <- ggplot(top_states_data_DW_House, aes(x = Year, y = Age_Adjusted_Rate, color = State)) +
+  geom_line() +
+  labs(
+    title = "Consistently Top Tercile States of the DW-Nominate House Score, 2012-2024",
+    x = "",
+    y = ""
+  ) +
+  theme_minimal() +
+  scale_y_continuous(limits = c(0, 550)) +
+  scale_x_continuous(limits = c(2012, 2024), breaks = seq(2012, 2024, by = 2)) + 
+  theme(
+    plot.title = element_text(size = 6, hjust = 0.5, lineheight = 0.9, margin = margin(b = 10)),
+    axis.title.y = element_text(size = 5),
+    axis.text.y = element_text(size = 5),
+    axis.text.x = element_text(size = 5, hjust = 1),
+    plot.title.position = "plot"
+  )
+
+
+bottom_states_data_DW_House <- merged_data_DW_House %>% filter(Tercile == "Bottom")
+plot_bottom_DW_House <- ggplot(bottom_states_data_DW_House, aes(x = Year, y = Age_Adjusted_Rate, color = State)) +
+  geom_line() +
+  labs(
+    title = "Consistently Bottom Tercile States of the DW-Nominate House Score, 2012-2024",
+    x = "",
+    y = ""
+  ) +
+  theme_minimal() +
+  scale_y_continuous(limits = c(0, 550)) +
+  scale_x_continuous(limits = c(2012, 2024), breaks = seq(2012, 2024, by = 2)) + 
+  theme(
+    plot.title = element_text(size = 6, hjust = 0.5, lineheight = 0.9, margin = margin(b = 10)),
+    axis.title.y = element_text(size = 5),
+    axis.text.y = element_text(size = 5),
+    axis.text.x = element_text(size = 5, hjust = 1),
+    plot.title.position = "plot"
+  )
+
+top_states_data_DW_Senate <- merged_data_DW_Senate %>% filter(Tercile == "Top")
+plot_top_DW_Senate <- ggplot(top_states_data_DW_Senate, aes(x = Year, y = Age_Adjusted_Rate, color = State)) +
+  geom_line() +
+  labs(
+    title = "Consistently Top Tercile States of the DW-Nominate Senate Score, 2012-2024",
+    x = "",
+    y = ""
+  ) +
+  theme_minimal() +
+  scale_y_continuous(limits = c(0, 550)) +
+  scale_x_continuous(limits = c(2012, 2024), breaks = seq(2012, 2024, by = 2)) + 
+  theme(
+    plot.title = element_text(size = 6, hjust = 0.5, lineheight = 0.9, margin = margin(b = 10)),
+    axis.title.y = element_text(size = 5),
+    axis.text.y = element_text(size = 5),
+    axis.text.x = element_text(size = 5, hjust = 1),
+    plot.title.position = "plot"
+  )
+
+
+bottom_states_data_DW_Senate <- merged_data_DW_Senate %>% filter(Tercile == "Bottom")
+plot_bottom_DW_Senate <- ggplot(bottom_states_data_DW_Senate, aes(x = Year, y = Age_Adjusted_Rate, color = State)) +
+  geom_line() +
+  labs(
+    title = "Consistently Bottom Tercile States of the DW-Nominate Senate Score, 2012-2024",
+    x = "",
+    y = ""
+  ) +
+  theme_minimal() +
+  scale_y_continuous(limits = c(0, 550)) +
+  scale_x_continuous(limits = c(2012, 2024), breaks = seq(2012, 2024, by = 2)) + 
+  theme(
+    plot.title = element_text(size = 6, hjust = 0.5, lineheight = 0.9, margin = margin(b = 10)),
+    axis.title.y = element_text(size = 5),
+    axis.text.y = element_text(size = 5),
+    axis.text.x = element_text(size = 5, hjust = 1),
+    plot.title.position = "plot"
+  )
+
+not_consistent_states_data_DW_Senate <- merged_data_DW_Senate %>% filter(Tercile == "Not Consistent")
+plot_not_consistent_DW_Senate <- ggplot(not_consistent_states_data_DW_Senate, aes(x = Year, y = Age_Adjusted_Rate, color = State)) +
+  geom_line() +
+  labs(
+    title = "Not Consistent States of the DW-Nominate Senate Score, 2012-2024",
+    x = "",
+    y = ""
+  ) +
+  theme_minimal() +
+  scale_y_continuous(limits = c(0, 550)) +
+  scale_x_continuous(limits = c(2012, 2024), breaks = seq(2012, 2024, by = 2)) + 
+  theme(
+    plot.title = element_text(size = 6, hjust = 0.5, lineheight = 0.9, margin = margin(b = 10)),
+    axis.title.y = element_text(size = 5),
+    axis.text.y = element_text(size = 5),
+    axis.text.x = element_text(size = 5, hjust = 1),
+    plot.title.position = "plot"
+  )
+
+
+```
+
+##Grid arrange
+```{r}
+
+create_column_with_legend <- function(plot1, plot2, plot3, labels, align_titles = "center") {
+  hjust_val <- ifelse(align_titles == "left", 0, 0.5)
+  
+  plots <- list(
+    add_label(plot1 + theme(plot.margin = margin(10, 10, 10, 10), plot.title = element_text(size = 8, vjust = 2, hjust = hjust_val)), labels[1]),
+    add_label(plot2 + theme(plot.margin = margin(10, 10, 10, 10), plot.title = element_text(size = 8, vjust = 2, hjust = hjust_val)), labels[2]),
+    add_label(plot3 + theme(plot.margin = margin(10, 10, 10, 10), plot.title = element_text(size = 8, vjust = 2, hjust = hjust_val)), labels[3])
+  )
+  
+  plot_grid_combined <- plot_grid(plotlist = plots, ncol = 1, align = 'v', rel_heights = c(1, 1, 1))
+  
+  return(plot_grid_combined)
+}
+
+column_one <- create_column_with_legend(
+  state_lib_top_state_premature_mortality,
+  state_lib_not_consistent_state_premature_mortality,
+  state_lib_bottom_state_premature_mortality,
+  labels = c('A', 'B', 'C')
+)
+
+ggsave("column_one_with_legend.pdf", plot = column_one, width = 7, height = 14, bg = "white")
+
+column_two <- create_column_with_legend(
+  state_trifecta_democrat_premature_mortality,
+  state_trifecta_mixed_premature_mortality,
+  state_trifecta_republican_premature_mortality,
+  labels = c('D', 'E', 'F'),
+  align_titles = "left"
+)
+
+ggsave("column_two_with_legend.pdf", plot = column_two, width = 7, height = 14, bg = "white")
+
+# Column Three
+column_three <- create_column_with_legend(
+  plot_top_DW_House,
+  plot_not_consistent_DW_House,
+  plot_bottom_DW_House,
+  labels = c('G', 'H', 'I')
+)
+
+ggsave("column_three_with_legend.pdf", plot = column_three, width = 7, height = 14, bg = "white")
+
+# Column Four
+column_four <- create_column_with_legend(
+  plot_top_DW_Senate,
+  plot_not_consistent_DW_Senate,
+  plot_bottom_DW_Senate,
+  labels = c('J', 'K', 'L')
+)
+
+ggsave("column_four_with_legend.pdf", plot = column_four, width = 7, height = 14, bg = "white") 
+
+
+create_row_with_legend <- function(plot1, plot2, plot3, labels) {
+  plots <- list(
+    add_label(plot1 + theme(
+                plot.margin = margin(t = 0.2, r = 1, b = 1, l = 1, unit = "cm"), 
+                legend.position = "bottom",
+                legend.text = element_text(size = 5),
+                legend.title = element_text(size = 5),
+                legend.key.size = unit(0.25, "cm")), labels[1]),
+    add_label(plot2 + theme(
+                plot.margin = margin(t = 0.2, r = 1, b = 1, l = 1, unit = "cm"),
+                legend.position = "bottom",
+                legend.text = element_text(size = 5),
+                legend.title = element_text(size = 5),
+                legend.key.size = unit(0.25, "cm")), labels[2]),
+    add_label(plot3 + theme(
+                plot.margin = margin(t = 0.2, r = 1, b = 1, l = 1, unit = "cm"), 
+                legend.position = "bottom",
+                legend.text = element_text(size = 5),
+                legend.title = element_text(size = 5),
+                legend.key.size = unit(0.25, "cm")), labels[3])
+  )
+  
+  plot_grid_combined <- plot_grid(plotlist = plots, ncol = 3, align = 'h', rel_widths = c(1, 1, 1))
+  
+  return(plot_grid_combined)
+}
+
+
+# Row One
+row_one <- create_row_with_legend(
+  state_lib_top_state_premature_mortality,
+  state_lib_not_consistent_state_premature_mortality,
+  state_lib_bottom_state_premature_mortality,
+  labels = c('A', 'B', 'C')
+)
+
+# Row Two - Titles removed now
+row_two <- create_row_with_legend(
+  state_trifecta_democrat_premature_mortality,
+  state_trifecta_mixed_premature_mortality,
+  state_trifecta_republican_premature_mortality,
+  labels = c('D', 'E', 'F')
+)
+
+# Row Three - Titles removed now
+row_three <- create_row_with_legend(
+  plot_top_DW_House,
+  plot_not_consistent_DW_House,
+  plot_bottom_DW_House,
+  labels = c('G', 'H', 'I')
+)
+
+# Row Four - Titles removed now
+row_four <- create_row_with_legend(
+  plot_top_DW_Senate,
+  plot_not_consistent_DW_Senate,
+  plot_bottom_DW_Senate,
+  labels = c('J', 'K', 'L')
+)
+
+
+create_combined_page <- function(row_one, row_two) {
+  combined_plot <- plot_grid(
+    row_one,
+    row_two,
+    ncol = 1,
+    rel_heights = c(1, 1)  
+  )
+  
+  title <- ggdraw() + 
+    draw_label(
+      "Figure S1. Trends in state-level age-adjusted premature mortality rate per 100,000, by state, by stratified state-level political metrics, for the 50 US states and the District of Columbia (2012-2024)",
+      fontface = 'bold',
+      size = 7,
+      hjust = 0.5
+    ) + 
+    theme(plot.margin = margin(0, 0, 5, 0))
+  
+  plot_with_title <- plot_grid(
+    title,
+    combined_plot,
+    ncol = 1,
+    rel_heights = c(0.05, 1) 
+  )
+  
+  return(plot_with_title)
+}
+
+pdf("final_two_rows_per_page_landscape.pdf", width = 11, height = 8.5) 
+
+
+# Row One for State Liberalism Index
+row_one_imr <- create_row_with_legend(
+  state_lib_top_state_imr,
+  state_lib_not_consistent_state_imr,
+  state_lib_bottom_state_imr,
+  labels = c('A', 'B', 'C')
+)
+
+ggsave("row_one_with_legend_imr.pdf", plot = row_one_imr, width = 21, height = 7, bg = "white")
+
+# Row Two for State Trifecta
+row_two_imr <- create_row_with_legend(
+  state_trifecta_democrat_imr,
+  state_trifecta_mixed_imr,
+  state_trifecta_republican_imr,
+  labels = c('D', 'E', 'F')
+)
+
+ggsave("row_two_with_legend_imr.pdf", plot = row_two_imr, width = 21, height = 7, bg = "white")
+
+# Row Three for DW-NOMINATE House
+row_three_imr <- create_row_with_legend(
+  plot_top_DW_House,
+  plot_not_consistent_DW_House,
+  plot_bottom_DW_House,
+  labels = c('G', 'H', 'I')
+)
+
+ggsave("row_three_with_legend_imr.pdf", plot = row_three_imr, width = 21, height = 7, bg = "white")
+
+# Row Four for DW-NOMINATE Senate
+row_four_imr <- create_row_with_legend(
+  plot_top_DW_Senate,
+  plot_not_consistent_DW_Senate,
+  plot_bottom_DW_Senate,
+  labels = c('J', 'K', 'L')
+)
+
+ggsave("row_four_with_legend_imr.pdf", plot = row_four_imr, width = 21, height = 7, bg = "white")
+
+##GRID ARRANGE FOR % UNINSURED
+# Row One for State Liberalism Index
+row_one_uninsured <- create_row_with_legend(
+  state_lib_top_state_uninsured,
+  state_lib_not_consistent_state_uninsured,
+  state_lib_bottom_state_uninsured,
+  labels = c('A', 'B', 'C')
+)
+
+ggsave("row_one_with_legend_uninsured.pdf", plot = row_one_uninsured, width = 21, height = 7, bg = "white")
+
+# Row Two for State Trifecta
+row_two_uninsured <- create_row_with_legend(
+  state_trifecta_democrat_uninsured,
+  state_trifecta_mixed_uninsured,
+  state_trifecta_republican_uninsured,
+  labels = c('D', 'E', 'F')
+)
+
+ggsave("row_two_with_legend_uninsured.pdf", plot = row_two_uninsured, width = 21, height = 7, bg = "white")
+
+# Row Three for DW-NOMINATE House
+row_three_uninsured <- create_row_with_legend(
+  plot_top_DW_House_uninsured,
+  plot_not_consistent_DW_House_uninsured,
+  plot_bottom_DW_House_uninsured,
+  labels = c('G', 'H', 'I')
+)
+
+ggsave("row_three_with_legend_uninsured.pdf", plot = row_three_uninsured, width = 21, height = 7, bg = "white")
+
+# Row Four for DW-NOMINATE Senate
+row_four_uninsured <- create_row_with_legend(
+  plot_top_DW_Senate_uninsured,
+  plot_not_consistent_DW_Senate_uninsured,
+  plot_bottom_DW_Senate_uninsured,
+  labels = c('J', 'K', 'L')
+)
+
+ggsave("row_four_with_legend_uninsured.pdf", plot = row_four_uninsured, width = 21, height = 7, bg = "white")  
+
+
+```
+
+#Joinpoint analysis
+```{r}
+final_full_trend_data<-readRDS(file = "final_full_trend_data_2012_2024.rds")
+
+final_full_trend_data|>
+mutate(Infant_Deaths = Infant_MR * Total_Births / 1000,
+Count_Uninsured = Average_Percent_Uninsured_35_64 * Total_Population_35_64 / 100) |>
+mutate(p = Infant_Deaths / Total_Births,
+p_uninsured = Count_Uninsured / Total_Population_35_64,
+Standard_Error_Proportion = sqrt(p * (1 - p) / Total_Births),
+Standard_Error_IMR = Standard_Error_Proportion * 1000,
+Standard_Error_Uninsured = sqrt(p_uninsured * (1-p_uninsured) / Total_Population_35_64),
+Standard_Error_Uninsured_Percent = Standard_Error_Uninsured * 100)
+# carry forward poverty measures for 2023 and 2024 from 2022
+final_full_trend_data <- final_full_trend_data |>
+filter(Year == 2022) |>
+dplyr::select(State, Percent_Child_Poverty, Percent_Below_poverty_65_plus) |>
+rename(perc_child_poverty_2022 = Percent_Child_Poverty,
+perc_below_poverty_2022 = Percent_Below_poverty_65_plus) |>
+right_join(final_full_trend_data, by="State") |>
+mutate(Percent_Child_Poverty = if_else(Year %in% c(2023, 2024),
+perc_child_poverty_2022,
+Percent_Child_Poverty),
+Percent_Below_poverty_65_plus = if_else(Year %in% c(2023, 2024),
+perc_below_poverty_2022,
+Percent_Below_poverty_65_plus)) |>
+dplyr::select(-perc_child_poverty_2022, -perc_below_poverty_2022) |>
+mutate(DW_Senate_Tercile = factor(DW_Senate_Tercile, levels = c("Top", "Not Consistent", "Bottom")))
+
+
+# uninsured - State_Lib_Tercile
+uninsured_statelib_temp_data <- final_full_trend_data |>
+  mutate(year = Year - 2012,
+         year_bottom = (State_Lib_Tercile == "Bottom") * year,
+         year2_bottom = (State_Lib_Tercile == "Bottom") * ifelse(Year<2015, 0, Year - 2015),
+         year_middle = (State_Lib_Tercile == "Not Consistent") * year,
+         year2_middle = (State_Lib_Tercile == "Not Consistent") * ifelse(Year<2015, 0, Year - 2015),
+         year_top =  (State_Lib_Tercile == "Top") * year,
+         year2_top = (State_Lib_Tercile == "Top") * ifelse(Year<2015, 0, Year - 2015))|>
+  filter(!is.na(State_Lib_Tercile) & !is.na(Average_Percent_Uninsured_35_64))
+
+
+uninsured_statelib_temp_data <- uninsured_statelib_temp_data %>%
+  mutate(State_Lib_Tercile = relevel(as.factor(State_Lib_Tercile), ref = "Top"))
+
+
+UNINSURED_State_Lib <- lme(fixed = Average_Percent_Uninsured_35_64 ~ State_Lib_Tercile + year_bottom + year2_bottom + year_middle + year2_middle + year_top + year2_top, random = ~ 1 | State, data = uninsured_statelib_temp_data)
+
+summary(UNINSURED_State_Lib)
+
+
+f_get_variance <- function(varcov, x, y, z, a, b, c) {
+  this_variance <- a^2 * varcov[x, x] + b^2 * varcov[y, y] + c^2 * varcov[z, z] +
+    2 * a * b * varcov[x, y] + 2 * a * c * varcov[x, z] + 2 * b * c * varcov[y, z]
+  return(this_variance)
+}
+
+f_get_variance2 <- function(varcov, w, x, y, z, a, b, c, d) {
+  this_variance <- a^2 * varcov[w, w] + b^2 * varcov[x, x] + c^2 * varcov[y, y] + d^2 * varcov[z, z] +
+    2 * a * b * varcov[w, x] + 2 * a * c * varcov[w, y] + 2 * a * d * varcov[w, z] +
+    2 * b * c * varcov[x, y] + 2 * b * d * varcov[x, z] +
+    2 * c * d * varcov[y, z]
+  return(this_variance)
+}
+
+f_get_variance3 <- function(varcov, u, v, w, x, y, z, a, b, c, d, e, f) {
+  this_variance <- a^2 * varcov[u, u] + b^2 * varcov[v, v] + c^2 * varcov[w, w] +
+    d^2 * varcov[x, x] + e^2 * varcov[y, y] + f^2 * varcov[z, z] +
+    2 * a * b * varcov[u, v] + 2 * a * c * varcov[u, w] + 2 * a * d * varcov[u, x] + 2 * a * e * varcov[u, y] + 2 * a * f * varcov[u, z] +
+    2 * b * c * varcov[v, w] + 2 * b * d * varcov[v, x] + 2 * b * e * varcov[v, y] + 2 * b * f * varcov[v, z] +
+    2 * c * d * varcov[w, x] + 2 * c * e * varcov[w, y] + 2 * c * f * varcov[w, z] +
+    2 * d * e * varcov[x, y] + 2 * d * f * varcov[x, z] + 2 * e * f * varcov[y, z]
+  return(this_variance)
+}
+
+f_get_variance4 <- function(varcov, v, w, x, y, z, a, b, c, d, e) {
+  this_variance <- a^2 * varcov[v, v] + b^2 * varcov[w, w] + c^2 * varcov[x, x] + d^2 * varcov[y, y] + e^2 * varcov[z, z] +
+    2 * a * b * varcov[v, w] + 2 * a * c * varcov[v, x] + 2 * a * d * varcov[v, y] + 2 * a * e * varcov[v, z] +
+    2 * b * c * varcov[w, x] + 2 * b * d * varcov[w, y] + 2 * b * e * varcov[w, z] +
+    2 * c * d * varcov[x, y] + 2 * c * e * varcov[x, z] + 2 * d * e * varcov[y, z]
+  return(this_variance)
+}
+
+#INDEXING:
+#[1] Intercept
+#[2] State_Lib_TercileBottom
+#[3] State_Lib_TercileNot Consistent
+#[4] year_bottom
+#[5] year2_bottom
+#[6] year_middle
+#[7] year2_middle
+#[8] year_top
+#[9] year2_top
+
+
+# Baseline (2012)
+
+# Extract coefficients and variance-covariance matrix
+coef_UNINSURED_State_Lib <- tidy(UNINSURED_State_Lib)$estimate[1:11]
+varcov_UNINSURED_State_Lib <- summary(UNINSURED_State_Lib)$varFix
+
+# 2012 (Baseline)
+notcons_top_2012 <- coef_UNINSURED_State_Lib[3]
+notcons_top_2012_CI <- c(
+  notcons_top_2012, 
+  notcons_top_2012 + c(-1, 1) * 1.96 * sqrt(varcov_UNINSURED_State_Lib[3, 3])
+)
+print(notcons_top_2012_CI)
+
+bottom_top_2012 <- coef_UNINSURED_State_Lib[2]
+bottom_top_2012_CI <- c(
+  bottom_top_2012, 
+  bottom_top_2012 + c(-1, 1) * 1.96 * sqrt(varcov_UNINSURED_State_Lib[2, 2])
+)
+print(bottom_top_2012_CI)
+
+
+
+# 2015 (Inflection Point)
+
+
+# Bottom vs Top RD in 2015
+
+bottom_top_2015 <- coef_UNINSURED_State_Lib[2] + 
+                   coef_UNINSURED_State_Lib[4] * (2015 - 2012) - 
+                   coef_UNINSURED_State_Lib[8] * (2015 - 2012)
+
+
+bottom_top_2015_var <- f_get_variance(varcov_UNINSURED_State_Lib, x=2, y=4, z=8, a=1, b=(2015 - 2012), c=-(2015 - 2012))
+bottom_top_2015_CI <- bottom_top_2015 + c(-1, 1) * 1.96 * sqrt(bottom_top_2015_var)
+
+bottom_top_2015
+bottom_top_2015_CI
+
+
+notcons_top_2015 <- coef_UNINSURED_State_Lib[3] + coef_UNINSURED_State_Lib[6] * (2015 - 2012)
+variance_2015 <- f_get_variance(varcov_UNINSURED_State_Lib, x=3, y=6, z=3, a=1, b=(2015 - 2012), c=(2015 - 2012))
+
+notcons_top_2015_CI <- notcons_top_2015 + c(-1, 1) * 1.96 * sqrt(variance_2015)
+
+notcons_top_2015
+notcons_top_2015_CI
+
+
+#########2024
+
+bottom_top_2024 <- (coef_UNINSURED_State_Lib[2] + 
+                    coef_UNINSURED_State_Lib[4] * (2024 - 2012) + 
+                    coef_UNINSURED_State_Lib[5] * (2024 - 2015)) -
+                   (coef_UNINSURED_State_Lib[8] * (2024 - 2012) + 
+                    coef_UNINSURED_State_Lib[9] * (2024 - 2015))
+
+variance_2024 <- f_get_variance4(varcov_UNINSURED_State_Lib, 
+                                 v=2, w=4, x=5, y=8, z=9, 
+                                 a=1, b=(2024 - 2012), c=(2024 - 2015), d=(2024 - 2012), e=(2024 - 2015))
+
+se_2024 <- sqrt(variance_2024)
+
+bottom_top_2024_CI <- bottom_top_2024 + c(-1, 1) * 1.96 * se_2024
+
+bottom_top_2024
+bottom_top_2024_CI
+
+
+
+notcons_top_2024 <- (coef_UNINSURED_State_Lib[3] + 
+                     coef_UNINSURED_State_Lib[6] * (2024 - 2012) + 
+                     coef_UNINSURED_State_Lib[7] * (2024 - 2015)) - 
+                    (coef_UNINSURED_State_Lib[8] * (2024 - 2012) + 
+                     coef_UNINSURED_State_Lib[9] * (2024 - 2015))
+
+variance_2024 <- f_get_variance4(varcov_UNINSURED_State_Lib, 
+                v=3, w=6, x=7, y=8, z=9, 
+                a=1, b=(2024 - 2012), c=(2024 - 2015), d=(2024 - 2012), e=(2024 - 2015))
+
+
+se_2024 <- sqrt(variance_2024)
+
+notcons_top_2024_CI <- notcons_top_2024 + c(-1, 1) * 1.96 * se_2024
+
+notcons_top_2024
+notcons_top_2024_CI
+
+
+
+
+
+###UNINSURED STATE TRIFECTA 
+uninsured_trifecta_temp_data <- final_full_trend_data |>
+  mutate(year = Year - 2012,
+         year_bottom = (Consistency == "Republican") * year,
+         year2_bottom = (Consistency == "Republican") * ifelse(Year<2015, 0, Year - 2015),
+         year_middle = (Consistency == "Mixed") * year,
+         year2_middle = (Consistency == "Mixed") * ifelse(Year<2015, 0, Year - 2015),
+         year_top =  (Consistency == "Democrat") * year,
+         year2_top = (Consistency == "Democrat") * ifelse(Year<2015, 0, Year - 2015)) |>
+  filter(!is.na(Consistency) & !is.na(Average_Percent_Uninsured_35_64))
+
+UNINSURED_Trifecta <- lme(fixed = Average_Percent_Uninsured_35_64 ~ factor(Consistency, levels = c("Democrat","Republican", "Mixed")) + year_bottom + year2_bottom + year_middle + year2_middle + year_top + year2_top + Percent_Child_Poverty + Percent_Below_poverty_65_plus,
+      random = ~ 1 | State,
+      data = uninsured_trifecta_temp_data)
+
+summary(UNINSURED_Trifecta)
+
+coef_UNINSURED_Trifecta <- summary(UNINSURED_Trifecta)$coefficients$fixed
+
+# get var-cov matrix
+varcov_UNINSURED_Trifecta <- summary(UNINSURED_Trifecta)$varFix
+
+
+###UNINSURED DW NOMINATE HOUSE
+uninsured_dwhouse_temp_data <- final_full_trend_data |>
+  mutate(year = Year - 2012,
+         year_bottom = (DW_House_Tercile == "Bottom") * year,
+         year2_bottom = (DW_House_Tercile == "Bottom") * ifelse(Year<2015, 0, Year - 2015),
+         year_middle = (DW_House_Tercile  == "Not Consistent") * year,
+         year2_middle = (DW_House_Tercile  == "Not Consistent") * ifelse(Year<2015, 0, Year - 2015),
+         year_top =  (DW_House_Tercile  == "Top") * year,
+         year2_top = (DW_House_Tercile  == "Top") * ifelse(Year<2015, 0, Year - 2015)) |>
+  filter(!is.na(DW_House_Tercile) & !is.na(Average_Percent_Uninsured_35_64))
+
+UNINSURED_dwhouse <- lme(fixed = Average_Percent_Uninsured_35_64 ~ factor(DW_House_Tercile, levels = c("Top", "Not Consistent", "Bottom")) + year_bottom + year2_bottom + year_middle + year2_middle + year_top + year2_top,
+      random = ~ 1 | State,
+      data = uninsured_dwhouse_temp_data)
+
+summary(UNINSURED_dwhouse)
+
+# get betas
+coef_UNINSURED_dwhouse <- tidy(UNINSURED_dwhouse)[1:9,1]
+
+# get var-cov matrix
+varcov_UNINSURED_dwhouse <- summary(UNINSURED_dwhouse)$varFix
+
+###UNINSURED DW NOMINATE SENATE
+uninsured_dwsenate_temp_data <- final_full_trend_data |>
+  mutate(year = Year - 2012,
+         year_bottom = (DW_Senate_Tercile == "Bottom") * year,
+         year2_bottom = (DW_Senate_Tercile == "Bottom") * ifelse(Year<2015, 0, Year - 2015),
+         year_middle = (DW_Senate_Tercile  == "Not Consistent") * year,
+         year2_middle = (DW_Senate_Tercile  == "Not Consistent") * ifelse(Year<2015, 0, Year - 2015),
+         year_top =  (DW_Senate_Tercile  == "Top") * year,
+         year2_top = (DW_Senate_Tercile  == "Top") * ifelse(Year<2015, 0, Year - 2015)) |>
+  filter(!is.na(DW_Senate_Tercile) & !is.na(Average_Percent_Uninsured_35_64))
+
+UNINSURED_dwsenate <- lme(fixed = Average_Percent_Uninsured_35_64 ~ factor(DW_Senate_Tercile, levels = c("Top", "Not Consistent", "Bottom")) + year_bottom + year2_bottom + year_middle + year2_middle + year_top + year2_top,
+      random = ~ 1 | State,
+      data = uninsured_dwsenate_temp_data)
+
+summary(UNINSURED_dwsenate)
+
+# get betas
+coef_UNINSURED_dwsenate <- tidy(UNINSURED_dwsenate)[1:9,1]
+
+# get var-cov matrix
+varcov_UNINSURED_dwsenate <- summary(UNINSURED_dwsenate)$varFix
+
+```
+
