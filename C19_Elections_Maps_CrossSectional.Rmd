@@ -1,0 +1,577 @@
+---
+title: "C19_Elections_Maps"
+output: html_document
+date: "`r Sys.Date()`"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library("tidyverse")
+library("janitor")
+library("tigris")
+library("sf")
+library("ggdist")
+library("ggrepel")
+library("ggh4x")
+library("corrplot")
+library("ggpubr")
+
+
+# NEGATE FUNCTION
+`%ni%` <- Negate(`%in%`)
+
+
+# Change this to local data folder
+data_loc <- "/Users/vic404/Library/CloudStorage/GoogleDrive-vcowger@g.harvard.edu/My Drive/FXB/C19 Elections paper dataset "
+data_loc <- here::here("_data")
+
+```
+
+
+# Setup
+```{r}
+# Ordering Variables for Plots
+exp_vars <- c("cook_pvi", "state_liberalism",  "dw_nom_ice_house", "dw_nom_ice_senate", "trifecta")
+outcome_vars <- c("premature_mr", "premature_mr_black_nh", "premature_mr_hispanic", "premature_mr_white_nh",
+                  "infant_mr", "infant_mr_black_nh", "infant_mr_hispanic", "infant_mr_white_nh",
+                  "uninsured", "maternity_care", "ph_funding",
+                  "child_vax", "adult65_covid_booster", "adult65_flu_vax")
+cov_vars <- c("child_poverty", "elderly_poverty", "food_insecurity", "housing_insecurity")
+
+# Read in and Cleaning Variable Names
+all_dat_cross <- readRDS(file.path(data_loc, "Final cross-sectional dataset", "final_cross_sectional_dataset.rds")) %>%
+  clean_names() %>%
+  mutate(across(is.numeric, ~ifelse(is.nan(.x), NA, .x)), 
+         across(c("mean_uninsured", "mean_flu_shot_estimate", "mean_child_vaccines", 
+                  "mean_covid_booster", "mean_food_insecurity",
+                  "mean_maternity_care", 
+                  "mean_elderly_poverty"), ~.x/100)) %>%
+  rename("state_liberalism" = "state_liberalism_policy_score", 
+         "dw_nom_ice_house" = "dw_nominate_house",
+         "dw_nom_ice_senate" = "dw_nominate_senate",
+         "trifecta" = "overall_trifecta_status",
+         "premature_mr" = "mean_age_adjusted_rate", 
+         "premature_mr_black_nh" = "mean_black_age_adjusted_mortality",
+         "premature_mr_white_nh" = "mean_white_age_adjusted_mortality",
+         "premature_mr_hispanic" = "mean_hispanic_age_adjusted_mortality",
+         "adult65_flu_vax" = "mean_flu_shot_estimate",
+         "child_vax" = "mean_child_vaccines",
+         "adult65_covid_booster" = "mean_covid_booster"
+         ) %>%
+  rename_with(., ~str_remove(.x, "mean_")) %>%
+  rename_with(., ~str_remove(.x, "_estimate")) %>%
+  rename_with(., ~str_replace(.x, "non_hispanic", "nh")) %>%
+  dplyr::select(state, any_of(exp_vars), any_of(outcome_vars), any_of(cov_vars))
+  
+
+# Wide to Lon Form
+all_dat_long <- all_dat_cross %>% 
+  pivot_longer(cols = any_of(c(exp_vars, outcome_vars, cov_vars)), names_to = "var_lab", values_to = "value") %>% 
+  mutate(var_lab = factor(var_lab, levels = c(exp_vars, outcome_vars, cov_vars), ordered = TRUE))  %>% 
+  arrange(var_lab) %>% 
+  mutate(var_type = case_when(var_lab %in% exp_vars ~ "exp", 
+                              var_lab %in% outcome_vars ~ "outcome",
+                              var_lab %in% cov_vars ~ "cov"))
+
+```
+
+# Correlation Plot
+```{r fig.width = 8, fig.height = 8}
+#cor_dat <- all_dat %>% pivot_wider(id_cols = "state", values_from = "value", names_from = "var_lab") %>% dplyr::select(-state)
+cor_dat <- all_dat_cross %>% dplyr::select(-state, -housing_insecurity, -ph_funding, -trifecta, -contains("mr_")) %>% 
+  rename("State Liberalism Index" = "state_liberalism", 
+         "Cook PVI" = "cook_pvi", 
+         "DW-Nominate House (ICE)" = "dw_nom_ice_house", 
+         "DW-Nominate Senate (ICE)" = "dw_nom_ice_senate", 
+         "Premature Mortality Rate" = "premature_mr", 
+         "Infant Mortality Rate" = "infant_mr", 
+         "% Uninsured" ="uninsured", 
+         "% Maternity Care Desert" = "maternity_care",
+         "Child Vaccination Rate" = "child_vax", 
+         "65+ COVID Booster Rate" = "adult65_covid_booster", 
+         "65+ Flu Vaccination Rate" = "adult65_flu_vax", 
+         "Child Poverty Rate" = "child_poverty", 
+         "Elderly Poverty Rate" = "elderly_poverty", 
+         "Food Insecurity" = "food_insecurity")
+
+m <- cor(cor_dat, use ="pairwise.complete.obs")
+testRes <-  cor.mtest(cor_dat, conf.level = 0.95)
+
+# JPEG or PDF
+file_path= file.path(data_loc, "outputs", "corr_plot.pdf")
+#jpeg(height=8, width=8.5, file=file_path, type = "cairo", units = "in", res = 500)
+pdf(height=8, width=8.5, file=file_path)
+corrplot(m, tl.col = "black", type = "upper", method = "color",
+                       number.cex = 1, 
+                  tl.cex = 0.9,
+                 tl.pos = "lt", bg = "grey80",
+                 p.mat = testRes$p, insig="label_sig", sig.level = c(0.001, 0.01, 0.05),pch.cex = 0.9, pch.col = 'grey20')
+        
+        
+corrplot(m, 
+         tl.col = "transparent", 
+         type = "lower",
+                       addCoef.col = 'black',  
+                 method = "color", 
+                  cl.pos = "n",
+                  tl.cex = 0.9,
+                 add= TRUE,  
+                number.cex = 0.75, 
+                 tl.pos = "lt", bg = "grey80")
+
+ dev.off()
+
+```
+
+
+# Scatter Plots
+
+```{r echo=FALSE, fig.height=9, fig.width=9, message=FALSE, warning=FALSE}
+var_list <- all_dat_long %>% 
+  #filter(var_type != "exp") %>% 
+  pull(var_lab) %>% unique() %>% as.character()
+state_abb <- data.frame(st = state.abb, state = state.name) 
+
+state_abb <- bind_rows(state_abb, data.frame(st = "DC", state = "District of Columbia"))
+plot_list <- c()
+# Looping Through Variables to plot values vs
+for(i in 1:length(var_list)){
+  y_dat <- all_dat_long %>% filter(var_lab == var_list[i]) %>% dplyr::select(state, y_val=value) %>%
+    left_join(state_abb, by = "state") 
+  
+  cor_dat_temp <- all_dat_long %>% filter(var_type == "exp") %>% 
+    left_join(y_dat, by = "state") %>% group_by(var_lab) %>% 
+     summarise(cor = cor(value, y_val, use = "pairwise.complete.obs")) %>% 
+    mutate(cor = paste0("r = ",round(cor, 2)))
+  
+  colnames(y_dat) <- c("state", var_list[[i]], "st")
+  
+   
+  plot_list[[i]] <- all_dat_long %>% filter(var_type == "exp") %>% left_join(y_dat, by = "state") %>% 
+    ggplot(., aes_string(x="value", y = var_list[i])) +
+    geom_point() + 
+    geom_smooth(se = T) +
+    geom_label(data = cor_dat_temp, aes(x = Inf, y = Inf, label = cor), hjust   = 1, vjust   = 1, color = "blue") + 
+    labs(title = paste("Exposure Variables (x-axis) vs.",var_list[i], "(y-axis)")) +
+    facet_wrap(.~var_lab, scales = "free_x") + 
+    geom_text_repel(aes(label = st), min.segment.length = unit(0.5, "lines"), size = 2.5) +
+    theme_classic()
+}
+
+
+file_path= file.path(data_loc, "outputs", "scatter_plots.pdf")
+#jpeg(height=8, width=8.5, file=file_path, type = "cairo", units = "in", res = 500)
+pdf(height=8, width=8.5, file=file_path)
+plot_list
+dev.off()
+```
+
+# Maps
+
+## Get State Spatial data
+```{r}
+state_sf <- states(cb = TRUE, resolution = "20m") %>%
+  shift_geometry(position = "below", preserve_area = FALSE) %>% mutate(state = NAME)
+
+all_dat_sf <- all_dat_long %>% left_join(state_sf, by = "state") %>% st_as_sf() 
+```
+
+
+## Mapping function
+```{r, fig.width = 8, fig.height= 4}
+zoom <- 80000
+zoom <- 80000
+
+# Function To Create Map With Histogram
+map_panel_hist_right <- function(dat_sf, var_plot, scale = FALSE, panel_lab, legend_lab, 
+                      break_vals = NULL, n_breaks = NULL, percent = FALSE, accur = 0.1, 
+                      leg.width = 1.5, bivar_colors = FALSE, asym_colors = FALSE, 
+                      expand_width = 0.02, leg_scale = 0.97, 
+                      layout_in = "bin", plot_stack = FALSE, stack_width = 0.25, stack_mult = 0.9,
+                      bar_histogram = FALSE, bar_hist_widths = c(4.75,1),
+                      max_n_states = 10,
+                      rev_scale = FALSE, prob_cut = 0, cut_types = "equal", 
+                      manual_lab_vals = NULL, leg.width.num = 1.75){
+  # Filter to Plot Variable
+  plot_dat <- dat_sf %>% filter(var_lab == var_plot)
+  if(scale == TRUE){
+    plot_dat <- plot_dat %>% mutate(value = scale(value))
+  }
+  # If Null Will Use Percentile Cutpoints
+  if(is.null(break_vals) & cut_types == "percentiles"){
+    probs_in <- seq(0,1, length.out = n_breaks)
+    probs_in[1] <- 0+prob_cut 
+    probs_in[length(probs_in)] <- 1-prob_cut
+   plot_dat %>% filter(var_lab == var_plot) %>% pull(value) %>% quantile(., probs = probs_in) -> break_vals
+  }
+  
+  if(is.null(break_vals) & cut_types == "equal"){
+    probs_in <- seq(0,1, length.out = n_breaks)
+    probs_in[1] <- 0+prob_cut 
+    probs_in[length(probs_in)] <- 1-prob_cut
+    prob_ends <- c(min(probs_in), max(probs_in))
+   plot_dat %>% filter(var_lab == var_plot) %>% pull(value) %>% quantile(., probs = prob_ends) -> min_max
+   break_vals <- seq(min(min_max, na.rm=T), max(min_max, na.rm=T), length.out = n_breaks)
+  }
+  
+  # Break Labels & Palette
+  if(percent == TRUE){
+    break_labs <- break_vals
+    break_labs <- scales::label_percent(accuracy = accur)(break_labs)
+  }
+  if(percent == FALSE){
+    break_labs <- break_vals
+    break_labs <- scales::label_comma(accuracy = accur)(break_labs)
+  }
+  if(prob_cut>0){
+    break_labs[1] <- paste0("≤",break_labs[1])
+    break_labs[length(break_labs)] <- paste0(">",break_labs[length(break_labs)])
+  }
+  
+  break_pal <- pals::brewer.greys(length(break_labs))
+  if(bivar_colors==TRUE){break_pal <- pals::brewer.rdbu(length(break_labs))}
+  if(asym_colors == TRUE){
+    neg_vals <- which(break_vals<=0)
+    neg_pal <- pals::brewer.rdbu((length(neg_vals)*2)-1)
+    break_pal[neg_vals] <- head(neg_pal,length(neg_vals))
+    
+    pos_vals <- which(break_vals>=0)
+    pos_pal <- pals::brewer.rdbu((length(pos_vals)*2)-1)
+    break_pal[pos_vals] <- tail(pos_pal,length(pos_vals))
+  }
+  
+  if(rev_scale == TRUE){break_pal <- rev(break_pal)}
+  names(break_pal) <- break_labs
+  if(!is.null(manual_lab_vals)){names(break_pal) <- manual_lab_vals}
+  
+  # Create Map
+  map <- plot_dat %>% 
+    mutate(panel_lab_plot = panel_lab) %>%
+    ggplot(., aes(fill = value)) + 
+    geom_sf() +
+   # facet_wrap(~panel_lab_plot) + 
+    #theme_classic() +
+    scale_x_continuous(expand = c(0, 0), limits=c(st_bbox(plot_dat)[1]-zoom, st_bbox(plot_dat)[3]+zoom)) + 
+    scale_y_continuous(expand = c(0, 0), limits=c(st_bbox(plot_dat)[2]-zoom, st_bbox(plot_dat)[4]+zoom)) +
+    scale_fill_gradientn(colors=break_pal,
+                       limits = c(min(break_vals), max(break_vals)), 
+                       labels = names(break_pal),
+                       #values= rescale(unname(break_vals)),
+                       breaks= unname(break_vals),
+                       guide="none",
+                       oob=scales::squish, 
+                       name = paste0(legend_lab)) +
+    theme_void()+
+    theme(#plot.title = element_text(size = 13, face = "bold"), 
+          axis.text.x = element_blank(),
+          axis.title.x = element_blank(),
+      )
+  
+  # Height of Legend
+  leg.width <- unit(leg.width.num, "in")
+  
+  
+  if(percent == TRUE){expand_width <- expand_width/5} # For Percent Variables
+  
+  # Histogram Legend
+    hist <- plot_dat %>% filter(!is.na(value)) %>%
+      mutate(value = ifelse((value == max(value,na.rm=T) | min(value,na.rm=T)) & plot_stack == TRUE, 
+                            value*stack_mult, value)) %>%
+      mutate(panel_lab_plot = panel_lab) %>%
+      ggplot(., aes(y=value,  fill = value, x = "cat")) +
+        {if(plot_stack == FALSE)geom_dots(alpha=1, layout = layout_in, lwd =0.25, color = "black", dotsize=1, 
+                                          overflow = "keep")} + 
+        {if(plot_stack == TRUE){geom_dots(alpha=1, 
+                                          smooth = smooth_discrete(kernel = "triangular", width = stack_width), 
+                                     lwd =0.25, color = "black", dotsize=1, overflow = "keep") }}+
+    
+        scale_fill_gradientn(colors = break_pal, 
+                             limits = c(min(break_vals), max(break_vals)), 
+                             breaks = unname(break_vals),
+                             values = scales::rescale(break_vals),
+                             oob = scales::squish) + 
+        theme_bw() + 
+        guides(fill = guide_colorbar(barheight = leg.width*leg_scale, direction = "vertical", position = "inside"))  +
+        force_panelsizes(rows = leg.width) +
+      
+        scale_y_continuous(expand = c(expand_width, expand_width), 
+                           breaks = unname(break_vals), 
+                           limits = c(min(break_vals), max(break_vals)), 
+                           labels = names(break_pal)) +
+        scale_x_discrete(expand = c(0,0.2)) +
+        labs(title = paste0(panel_lab)) +
+  
+        theme(
+          axis.title.x = element_blank(),
+          axis.title.y = element_blank(),
+          axis.text.x = element_blank(),
+          legend.title =element_blank(),
+          legend.text = element_blank(),
+          plot.title = element_text(face = "bold", size = rel(1)),
+          plot.title.position = "plot",
+          panel.grid = element_blank(),
+          legend.margin = margin(0,0,0,0.0, "npc"),
+          legend.background = element_rect(fill = "transparent"),
+          legend.box.spacing = unit(0, "mm"),
+          legend.frame = element_rect(color = "black", linewidth =0.2),
+          #legend.ticks = element_blank(),
+          legend.ticks = element_line(color = "blue"),
+          legend.justification.inside = c(0, 0.5),
+          panel.border = element_blank(), 
+          #panel.grid.major = element_blank(),
+          #  panel.grid.minor = element_blank(),
+            panel.background = element_blank(),
+          plot.margin = margin(0,0,0,0, "pt"),
+         #plot.background = element_rect(color = "purple"),
+          #  panel.spacing = unit(c(0,0,0,0), "mm"), 
+          #  #axis.ticks.x = element_blank(),
+            axis.ticks.x = element_blank(),
+        #    axis.ticks.length.x =   unit(3, "pt")
+        )
+      # Bar Histogram
+      hist_bar <- plot_dat %>% filter(!is.na(value)) %>%
+        mutate(value = ifelse((value == max(value,na.rm=T) | min(value,na.rm=T)) & plot_stack == TRUE, 
+                              value*stack_mult, value)) %>%
+        mutate(panel_lab_plot = panel_lab) %>%
+        ggplot(., aes(y=value,  fill = ..y..)) +
+          geom_histogram(bins = length(break_vals), center =break_vals[1], color = "grey20", 
+                         linewidth = 0.2) + 
+      
+          scale_fill_gradientn(colors = break_pal, 
+                               limits = c(min(break_vals), max(break_vals)), 
+                               breaks = unname(break_vals),
+                               values = scales::rescale(break_vals),
+                               oob = scales::squish) + 
+          theme_bw() + 
+          force_panelsizes(rows = leg.width) +
+        
+          scale_y_continuous(expand = c(expand_width, expand_width), 
+                             breaks = unname(break_vals), 
+                            # limits = c(min(break_vals), max(break_vals)), 
+                             labels = names(break_pal)) +
+          scale_x_continuous(expand = c(0,0), breaks = seq(0, max_n_states, by =5)) +
+          labs(title = paste0(panel_lab)) +
+          
+          theme(
+            axis.title.x = element_blank(),
+            axis.title.y = element_blank(),
+            #axis.text.x = element_blank(),
+            plot.title = element_text(face = "bold", size = rel(1)),
+            plot.title.position = "plot",
+            panel.grid = element_blank(),
+            legend.position = "none",
+            axis.line.y = element_line(color = "grey30"),            
+            panel.border = element_blank(), 
+            panel.grid.major.x = element_line(color = "grey80", linetype=2),
+            #  panel.grid.minor = element_blank(),
+              panel.background = element_blank(),
+            plot.margin = margin(0,0,0,0, "pt"),
+           #plot.background = element_rect(color = "purple"),
+            #  panel.spacing = unit(c(0,0,0,0), "mm"), 
+          #    axis.ticks.length.x =   unit(3, "pt")
+          )
+    # Combine plots
+    comb <- ggarrange(map, hist, ncol = 2, widths = c(2.25,1))
+    if(bar_histogram==TRUE){comb <- ggarrange(map, hist_bar, ncol = 2, widths = bar_hist_widths)}
+
+    return(comb)
+  
+}
+
+# Examples
+map_exp_trifecta <- map_panel_hist_right(all_dat_sf, "trifecta", panel_lab = "State Trifecta", legend_lab = "State\nTrifecta", 
+                        break_vals = seq(-1, 1, by = 1), percent = FALSE, leg.width =leg_width_temp, scale = FALSE, 
+                        accur = 0.1, 
+                        bivar_colors = TRUE, asym_colors = TRUE, max_n_states = 15,
+                        layout_in = "bar", bar_histogram = TRUE,
+                        manual_lab_vals = c("Rep", "None","Dem"),
+                       # plot_stack = TRUE, stack_width = 0.3,
+                        rev_scale = FALSE, 
+                       # manual_lab_vals = c("Rep","","","", "None","", "","", "Dem"), 
+                        )
+
+map_exp_dw_senate<- map_panel_hist_right(all_dat_sf, "dw_nom_ice_senate", panel_lab = "DW Nominate\nICE - Senate", legend_lab = "Score", 
+                        break_vals = seq(-1, 1, by = 0.25), percent = FALSE, leg.width =leg_width_temp, 
+                        scale = FALSE, accur = 0.1, bar_histogram = TRUE,
+                        #plot_stack = TRUE,stack_width = 0.3,
+                        layout_in = "bar", expand_width = 0.03,
+                        bivar_colors = TRUE, rev_scale = FALSE)
+map_exp_dw_senate
+
+map_exp_trifecta
+# Health Outcomes
+# Covariates
+map_out_uninsured <- map_panel_hist_right(all_dat_sf, "uninsured", panel_lab = "Uninsured", legend_lab = "%", 
+                        n_breaks=8, percent = TRUE, leg.width =leg_width_temp, scale = FALSE, accur = 0.1, cut_types = "equal", 
+                        bar_histogram = TRUE)
+
+map_out_uninsured
+
+```
+
+## Output 
+```{r, fig.width = 8, fig.height= 4}
+# Exposures
+cook_vals <- unique(sort(c(0,seq(-25, 15, by = 5))))
+all_dat_sf_cook <- all_dat_sf %>% filter(STUSPS %ni% "DC")
+map_exp_cook_pvi <- map_panel_hist_right(all_dat_sf_cook, "cook_pvi", panel_lab = "Cook PVI", 
+                                         legend_lab = "Score", 
+                        break_vals = cook_vals, percent = FALSE, leg.width =leg_width_temp, 
+                        scale = FALSE, accur = 1,
+                        bar_histogram = TRUE,
+                        bivar_colors = TRUE, asym_color = TRUE, rev_scale = FALSE)
+
+
+map_exp_dw_house<- map_panel_hist_right(all_dat_sf, "dw_nom_ice_house", 
+                                        panel_lab = "DW Nominate\nICE - House", legend_lab = "Score", 
+                        break_vals = seq(-1, 1, by = 0.2), percent = FALSE, leg.width =leg_width_temp, 
+                        scale = FALSE, accur = 0.1, bar_histogram = TRUE, 
+                        bivar_colors = TRUE,  rev_scale = FALSE)
+
+map_exp_dw_senate<- map_panel_hist_right(all_dat_sf, "dw_nom_ice_senate", panel_lab = "DW Nominate\nICE - Senate", 
+                                         legend_lab = "Score", 
+                        break_vals = seq(-1, 1, by = 0.25), percent = FALSE, leg.width =leg_width_temp, 
+                        scale = FALSE, accur = 0.1, 
+                        expand_width = 0.025, 
+                        #plot_stack = TRUE, stack_width = 0.8, stack_mult =0.95,
+                        layout_in = "bar", bar_histogram = TRUE, 
+                        bivar_colors = TRUE, rev_scale = FALSE)
+
+
+lib_vals <- unique(sort(c(seq(-3, 3, by = 0.5), 3.62)))
+
+map_exp_state_lib_index <- map_panel_hist_right(all_dat_sf, "state_liberalism", 
+                                          panel_lab = "State\nLiberalism\nIndex", legend_lab = "Index", 
+                        break_vals = lib_vals, percent = FALSE, leg.width =leg_width_temp, 
+                        scale = FALSE, accur = 0.1, 
+                        bar_histogram = TRUE, 
+                        bivar_colors = TRUE, asym_color = TRUE, rev_scale = FALSE)
+
+
+map_exp_trifecta <- map_panel_hist_right(all_dat_sf, "trifecta", panel_lab = "State\nTrifecta", 
+                                         legend_lab = "State\nTrifecta", 
+                        break_vals = seq(-1, 1, by =1), percent = FALSE, leg.width =leg_width_temp, scale = FALSE, 
+                        accur = 0.1, bar_histogram = TRUE, leg.width.num = 0.75, max_n_states = 15,
+                       # layout_in = "bar", 
+                        bivar_colors = TRUE, rev_scale = FALSE, manual_lab_vals = c("Rep", "None","Dem")
+                       )
+
+
+# Health Outcomes
+# Covariates
+map_out_uninsured <- map_panel_hist_right(all_dat_sf, "uninsured", panel_lab = "Uninsured", legend_lab = "%", 
+                      n_breaks = 8, expand_width = 0.025, leg_scale = 0.95, bar_histogram = TRUE, 
+                        percent = TRUE, leg.width =leg_width_temp, scale = FALSE, accur = 1.0, cut_types = "equal")
+
+map_out_child_vax <- map_panel_hist_right(all_dat_sf, "child_vax", 
+                                          panel_lab = "Childhood\nVaccinations", legend_lab = "%", 
+                                    expand_width = 0.03,leg_scale = 0.96,bar_histogram = TRUE, 
+                        n_breaks=9, percent = TRUE, leg.width =leg_width_temp, scale = FALSE, accur = 1.0)
+
+map_out_adult_covid_vax <- map_panel_hist_right(all_dat_sf, "adult65_covid_booster", 
+                                          panel_lab = "COVID-19\nBooster\nAges 65+", legend_lab = "%", 
+                                          bar_histogram = TRUE,
+                        n_breaks=8, percent = TRUE, leg.width =leg_width_temp, scale = FALSE, accur = 1, 
+                        expand_width = 0.05)
+
+map_out_adult_flu_vax <- map_panel_hist_right(all_dat_sf, "adult65_flu_vax", 
+                                              panel_lab = "Flu Vaccine\nAges 65+", legend_lab = "%", 
+                                              bar_histogram = TRUE, 
+                        n_breaks=8, percent = TRUE, leg.width =leg_width_temp, scale = FALSE, accur = 1)
+
+
+map_out_food_insecur <- map_panel_hist_right(all_dat_sf, "food_insecurity", 
+                                             panel_lab = "Food\nInsecurity", legend_lab = "%", 
+                        n_breaks=8, percent = TRUE, leg.width =leg_width_temp, bar_histogram = TRUE, 
+                        expand_width = 0.015,
+                        scale = FALSE, accur = 0.1)
+
+map_out_infant_mr <- map_panel_hist_right(all_dat_sf, "infant_mr", 
+                                          panel_lab = "Infant\nMortality\n Rate", legend_lab = "Rate", 
+                                          bar_histogram = TRUE, 
+                        n_breaks=8, percent = FALSE, leg.width =leg_width_temp, scale = FALSE, accur = 0.1)
+
+map_out_premature_mort <- map_panel_hist_right(all_dat_sf, "premature_mr", 
+                                               panel_lab = "Premature\nMortality", legend_lab = "Rate", 
+                                               bar_histogram = TRUE, 
+                        n_breaks=8, percent = FALSE, leg.width =leg_width_temp, scale = FALSE, accur = 1)
+
+map_out_ph <- map_panel_hist_right(all_dat_sf, "ph_funding", 
+                                   panel_lab = "PH Funding", legend_lab = "$", bar_histogram = TRUE, 
+                        n_breaks=10, percent = FALSE, leg.width =leg_width_temp, 
+                        scale = FALSE, accur = 1.0, prob_cut = 0.05)
+
+map_out_maternity_care <- map_panel_hist_right(all_dat_sf, "maternity_care", 
+                                               panel_lab = "Maternity\nCare Desert", legend_lab = "%", 
+                                               bar_histogram = TRUE, max_n_states = 15,
+                                    n_breaks=10, percent = TRUE, leg.width =leg_width_temp, 
+                                    scale = FALSE, accur = 1)
+
+
+
+# Covariates
+map_cov_cp <- map_panel_hist_right(all_dat_sf, "child_poverty", panel_lab = "Child Poverty", 
+                                   legend_lab = "%", 
+                                   bar_histogram = TRUE, 
+                        n_breaks=8, percent = TRUE, leg.width =leg_width_temp, scale = FALSE, accur = 1, 
+                        cut_types = "equal")
+map_cov_ep <- map_panel_hist_right(all_dat_sf, "elderly_poverty", panel_lab = "Poverty\nAged ≥65", 
+                                   legend_lab = "%", 
+                                   bar_histogram = TRUE, 
+                        n_breaks=8, percent = TRUE, leg.width =leg_width_temp, scale = FALSE, accur = 1)
+
+map_cov_hous <- map_panel_hist_right(all_dat_sf, "housing_insecurity", 
+                                     panel_lab = "Housing\nInsecurity", legend_lab = "%", 
+                                     bar_histogram = TRUE, 
+                        n_breaks=8, percent = TRUE, leg.width =leg_width_temp, scale = FALSE, accur = 1)
+
+map_exp_cook_pvi
+map_exp_dw_house
+map_exp_dw_senate
+map_exp_state_lib_index
+map_exp_trifecta
+
+map_cov_cp
+map_cov_ep
+map_cov_hous
+map_out_food_insecur
+
+
+map_out_uninsured
+map_out_child_vax
+map_out_adult_covid_vax
+map_out_adult_flu_vax
+map_out_infant_mr
+map_out_ph
+map_out_premature_mort
+map_out_maternity_care
+
+```
+## Arrange Maps
+```{r, fig.width = 12, fig.height=12}
+maps_exp_covs <- ggarrange(map_exp_cook_pvi, map_exp_state_lib_index, map_exp_dw_house, map_exp_dw_senate, map_exp_trifecta,
+          map_cov_cp, map_cov_ep, map_out_food_insecur,
+          nrow = 4, ncol=2, labels = "auto", vjust = 1, hjust = -2.5, label.x = 0.0)
+
+
+map_outcomes <- ggarrange(map_out_premature_mort, map_out_infant_mr, map_out_maternity_care, map_out_uninsured,
+                          map_out_child_vax, map_out_adult_covid_vax, map_out_adult_flu_vax, 
+          nrow = 4, ncol=2, labels = "auto", vjust = 1, hjust = -2.5, label.x = 0.0)
+
+maps_exp_covs
+map_outcomes
+
+hist_width <- 12.75
+hist_height <- 12
+ggsave(path = file.path(data_loc, "outputs"), filename = "map_exp_covs_hist.jpeg", maps_exp_covs, 
+       width = hist_width, height = hist_height, device='jpeg', dpi=700, scale = 1)
+ggsave(path = file.path(data_loc, "outputs"), filename = "map_exp_covs_hist.pdf", maps_exp_covs, 
+       width = hist_width, height = hist_height, device=cairo_pdf, dpi=700, scale = 1)
+
+
+ggsave(path = file.path(data_loc, "outputs"), filename = "map_outcomes_hist.jpeg", map_outcomes, 
+       width = hist_width, height = hist_height, device='jpeg', dpi=700, scale = 1)
+ggsave(path = file.path(data_loc, "outputs"), filename = "map_outcomes_hist.pdf", map_outcomes, 
+       width = hist_width, height = hist_height, device=cairo_pdf, dpi=700, scale = 1)
+```
+
