@@ -6,7 +6,7 @@ output: html_document
 ---
 
 #All code-related questions should be directed to soroushmoallef@g.harvard.edu
-#Code for
+#Code for Politicians, power, and the people’s health: US elections and state health outcomes, 2012-2024
 #Dependencies
 ```{r}
 library(ggplot2)
