@@ -5,11 +5,16 @@ date: "2024-08-21"
 output: html_document
 ---
 
+#All code-related questions should be directed to soroushmoallef@g.harvard.edu
+#Code for
 #Dependencies
 ```{r}
 library(ggplot2)
 library(reshape2)
-library(dplyr)
+library(tidyverse)
+library(tidycensus)
+library(segmented)
+library(lme4)
 library(haven)
 library(foreign)
 library(readr)
@@ -17,8 +22,12 @@ library(data.table)
 library(tidyverse)
 library(readxl)
 library(broom)
+library(broom.mixed)
+library(here)
 library(cowplot)
 library(gridExtra)
+
+
 ```
 
 
@@ -1306,7 +1315,7 @@ selected_elderly_poverty_2022 <- selected_elderly_poverty_2022[-1, ]
 View(selected_elderly_poverty_2022) ##DONE AND CLEAN
 
 
-###MERGE 2012 to 2022 (missing 2020 data)
+###MERGE 2012 to 2022 (2020 data is not available, so we took the average of 2019 and 2021 in its place)
 merged_selected_elderly_poverty <- selected_elderly_poverty_2021 %>%
   full_join(selected_elderly_poverty_2022, by = c("State", "Year"))
 
@@ -2060,23 +2069,20 @@ percentage_weights <- population_estimates %>%
     Year_2022_perc = sum(Population[Year == 2022] / total_population_2022),
     Year_2023_perc = sum(Population[Year == 2023] / total_population_2023),
     Avg_2020_2022_perc = mean(Population[Year %in% c(2020, 2021, 2022)] / (total_population_2020 + total_population_2021 + total_population_2022), na.rm = TRUE),
-    Avg_2021_2022_perc = mean(Population[Year %in% c(2021, 2022)] / total_population_2022, na.rm = TRUE)  # Adjusted for avg proportion
+    Avg_2021_2022_perc = mean(Population[Year %in% c(2021, 2022)] / total_population_2022, na.rm = TRUE) 
   ) %>%
   ungroup()
 
-# Verify the sums of each weight for correct approximation to 1
+# Verify that the sum of weights equals to 1
 cat("Sum of Year 2022 scaled weights:", sum(percentage_weights$Year_2022_perc, na.rm = TRUE), "\n")
 cat("Sum of Year 2023 scaled weights:", sum(percentage_weights$Year_2023_perc, na.rm = TRUE), "\n")
-cat("Sum of Avg 2022-2023 scaled weights:", sum(percentage_weights$Avg_2020_2022_perc, na.rm = TRUE), "\n")
+cat("Sum of Avg 2020-2023 scaled weights:", sum(percentage_weights$Avg_2020_2022_perc, na.rm = TRUE), "\n")
 cat("Sum of Avg 2021-2022 scaled weights:", sum(percentage_weights$Avg_2021_2022_perc, na.rm = TRUE), "\n")
+cat("Sum of Avg 2022-2023 scaled weights:", sum(percentage_weights$Avg_2020_2022_perc, na.rm = TRUE), "\n")
 
 # Read in the final cross-sectional data
 final_cross_sectional_data <- readRDS(file = "final_cross_sectional_dataset.rds")
-
-
 food_insecurity<-readRDS(file = "food_insecurity_2020to2022.rds")
-
-
 food_insecurity <- food_insecurity %>% rename(Mean_Food_Insecurity = Prevalence)
 
 final_cross_sectional_data <- final_cross_sectional_data %>%
@@ -2112,6 +2118,17 @@ standardized_data <- standardized_data %>%
   left_join(percentage_weights, by = "State")
 
 
+health_metrics <- c("Mean_Infant_MR", "Mean_Infant_MR_Black_Non_Hispanic", "Mean_Infant_MR_White_Non_Hispanic", "Mean_Infant_MR_Hispanic", 
+                    "Mean_Age_Adjusted_Rate", "Mean_Uninsured", "mean_black_age_adjusted_mortality", "mean_white_age_adjusted_mortality", 
+                    "mean_hispanic_age_adjusted_mortality", "Mean_Flu_Shot_Estimate", "Mean_Child_Vaccines", "Mean_COVID_Booster", "Mean_Food_Insecurity", 
+                    "Mean_Maternity_Care")
+
+exposures <- c("Cook_PVI_Standardized", "State_Liberalism_Policy_Score_Standardized", "Overall_Trifecta_Status_factor", "DW_Nominate_House_Standardized", "DW_Nominate_Senate_Standardized"
+               )
+
+covariates <- c("Elderly_Poverty_Standardized", "Child_Poverty_Standardized")
+
+
 get_weights <- function(health_metric) {
   switch(health_metric,
          "Mean_Infant_MR" = "Year_2023_perc",
@@ -2129,6 +2146,51 @@ get_weights <- function(health_metric) {
          "Mean_Food_Insecurity" = "Avg_2020_2022_perc",
          "Mean_Maternity_Care" = "Avg_2021_2022_perc")
 }
+
+#Function to run unadjusted models with 95% CI and weights
+run_unadjusted_models <- function(df, health_metrics, exposures, covariates) {
+  results <- list()
+  for (health in health_metrics) {
+    for (exposure in c(exposures, covariates)) {
+      cat("Running model for", health, "with exposure/covariate", exposure, "\n")
+      # Remove rows with NA in health or exposure
+      valid_data <- df[!is.na(df[[health]]) & !is.na(df[[exposure]]), c(health, exposure, get_weights(health))]
+      if (length(unique(valid_data[[exposure]])) >= 2) {  
+        weight_col <- get_weights(health)
+        model <- lm(as.formula(paste(health, "~", exposure)), data = valid_data, weights = valid_data[[weight_col]])
+        summary_model <- summary(model)
+        conf_int <- confint(model)
+        results[[paste(health, exposure, sep = "_")]] <- list(summary = summary_model, confint = conf_int)
+      } else {
+        cat("Skipping", exposure, "for", health, "due to insufficient levels.\n")
+      }
+    }
+  }
+  return(results)
+}
+
+#Function to run adjusted models with 95% CI and weights
+run_adjusted_models <- function(df, health_metrics, exposures, covariates) {
+  results <- list()
+  for (health in health_metrics) {
+    for (exposure in exposures) {
+      cat("Running adjusted model for", health, "with exposure", exposure, "\n")
+      # Remove rows with NA in health, exposure, or any covariates
+      valid_data <- df[complete.cases(df[c(health, exposure, covariates)]), c(health, exposure, covariates, get_weights(health))]
+      if (length(unique(valid_data[[exposure]])) >= 2) {  
+        weight_col <- get_weights(health)
+        model <- lm(as.formula(paste(health, "~", exposure, "+", paste(covariates, collapse = "+"))), data = valid_data, weights = valid_data[[weight_col]])
+        summary_model <- summary(model)
+        conf_int <- confint(model)
+        results[[paste(health, exposure, "adjusted", sep = "_")]] <- list(summary = summary_model, confint = conf_int)
+      } else {
+        cat("Skipping", exposure, "for", health, "due to insufficient levels.\n")
+      }
+    }
+  }
+  return(results)
+}
+
 
 unadjusted_results <- run_unadjusted_models(standardized_data, health_metrics, exposures, covariates)
 adjusted_results <- run_adjusted_models(standardized_data, health_metrics, exposures, covariates) 
@@ -3230,37 +3292,1122 @@ ggsave("row_four_with_legend_uninsured.pdf", plot = row_four_uninsured, width = 
 
 ```
 
-#Joinpoint analysis
-```{r}
-final_full_trend_data<-readRDS(file = "final_full_trend_data_2012_2024.rds")
 
-final_full_trend_data|>
-mutate(Infant_Deaths = Infant_MR * Total_Births / 1000,
-Count_Uninsured = Average_Percent_Uninsured_35_64 * Total_Population_35_64 / 100) |>
-mutate(p = Infant_Deaths / Total_Births,
-p_uninsured = Count_Uninsured / Total_Population_35_64,
-Standard_Error_Proportion = sqrt(p * (1 - p) / Total_Births),
-Standard_Error_IMR = Standard_Error_Proportion * 1000,
-Standard_Error_Uninsured = sqrt(p_uninsured * (1-p_uninsured) / Total_Population_35_64),
-Standard_Error_Uninsured_Percent = Standard_Error_Uninsured * 100)
+
+#Joinpoint / segmented regression analysis
+```{r}
+f_get_variance <- function(varcov, x, y, z, a, b, c){
+  this_variance <- a^2*varcov[x, x] + b^2*varcov[y, y] + c^2*varcov[z, z] +
+    2*a*b*varcov[x, y] + 2*a*c*varcov[x, z] + 2*b*c*varcov[y, z]
+  return(this_variance)
+}
+
+f_get_variance2 <- function(varcov, w, x, y, z, a, b, c, d){
+  this_variance <- a^2*varcov[w, w] + b^2*varcov[x, x] + c^2*varcov[y, y] + d^2*varcov[z, z] +
+    2*a*b*varcov[w, x] + 2*a*c*varcov[w, y] + 2*a*d*varcov[w, z] +
+    2*b*c*varcov[x, y] + 2*b*d*varcov[x, z] +
+    2*c*d*varcov[y, z]
+  return(this_variance)
+}
+
+f_get_variance3 <- function(varcov, u, v, w, x, y, z, a, b, c, d, e, f){
+  this_variance <- a^2*varcov[u, u] + b^2*varcov[v, v] + c^2*varcov[w, w] +
+    d^2*varcov[x, x] + e^2*varcov[y, y] + f^2*varcov[z, z] +
+    2*a*b*varcov[u, v] + 2*a*c*varcov[u, w] + 2*a*d*varcov[u, x] + 2*a*e*varcov[u, y] + 2*a*f*varcov[u, z] +
+    2*b*c*varcov[v, w] + 2*b*d*varcov[v, x] + 2*b*e*varcov[v, y] + 2*b*f*varcov[v, z] +
+    2*c*d*varcov[w, x] + 2*c*e*varcov[w, y] + 2*c*f*varcov[w, z] +
+    2*d*e*varcov[x, y] + 2*d*f*varcov[x, z] +
+    2*e*f*varcov[y, z]
+  return(this_variance)
+}
+
+
+f_get_variance4 <- function(varcov, v, w, x, y, z, a, b, c, d, e){
+  this_variance <- a^2*varcov[v, v] + b^2*varcov[w, w] + c^2*varcov[x, x] + d^2*varcov[y, y] + e^2*varcov[z, z] +
+    2*a*b*varcov[v, w] + 2*a*c*varcov[v, x] + 2*a*d*varcov[v, y] + 2*a*e*varcov[v, z] +
+    2*b*c*varcov[w, x] + 2*b*d*varcov[w, y] + 2*b*e*varcov[w, z] +
+    2*c*d*varcov[x, y] + 2*c*e*varcov[x, z] +
+    2*d*e*varcov[y, z]
+  return(this_variance)
+}
+
+
+final_full_trend_data <- readRDS(here("final_full_trend_data_2012_2024.rds")) |>
+  mutate(Infant_Deaths = Infant_MR * Total_Births / 1000,
+         Count_Uninsured = Average_Percent_Uninsured_35_64 * Total_Population_35_64 / 100) |>
+  mutate(p = Infant_Deaths / Total_Births,
+         p_uninsured = Count_Uninsured / Total_Population_35_64,
+         Standard_Error_Proportion = sqrt(p * (1 - p) / Total_Births),
+         Standard_Error_IMR = Standard_Error_Proportion * 1000,
+         Standard_Error_Uninsured = sqrt(p_uninsured * (1-p_uninsured) / Total_Population_35_64),
+         Standard_Error_Uninsured_Percent = Standard_Error_Uninsured * 100)
+
 # carry forward poverty measures for 2023 and 2024 from 2022
-final_full_trend_data <- final_full_trend_data |>
-filter(Year == 2022) |>
-dplyr::select(State, Percent_Child_Poverty, Percent_Below_poverty_65_plus) |>
-rename(perc_child_poverty_2022 = Percent_Child_Poverty,
-perc_below_poverty_2022 = Percent_Below_poverty_65_plus) |>
-right_join(final_full_trend_data, by="State") |>
-mutate(Percent_Child_Poverty = if_else(Year %in% c(2023, 2024),
-perc_child_poverty_2022,
-Percent_Child_Poverty),
-Percent_Below_poverty_65_plus = if_else(Year %in% c(2023, 2024),
-perc_below_poverty_2022,
-Percent_Below_poverty_65_plus)) |>
-dplyr::select(-perc_child_poverty_2022, -perc_below_poverty_2022) |>
-mutate(DW_Senate_Tercile = factor(DW_Senate_Tercile, levels = c("Top", "Not Consistent", "Bottom")))
+final_full_trend_data <- final_full_trend_data |> 
+  filter(Year == 2022) |> 
+  dplyr::select(State, Percent_Child_Poverty, Percent_Below_poverty_65_plus) |>
+  rename(perc_child_poverty_2022 = Percent_Child_Poverty,
+         perc_below_poverty_2022 = Percent_Below_poverty_65_plus) |>
+  right_join(final_full_trend_data, by="State") |>
+  mutate(Percent_Child_Poverty = if_else(Year %in% c(2023, 2024),
+                                         perc_child_poverty_2022,
+                                         Percent_Child_Poverty),
+         Percent_Below_poverty_65_plus = if_else(Year %in% c(2023, 2024),
+                                                 perc_below_poverty_2022,
+                                                 Percent_Below_poverty_65_plus)) |>
+  dplyr::select(-perc_child_poverty_2022, -perc_below_poverty_2022) |>
+  mutate(DW_House_Tercile = factor(DW_House_Tercile, levels = c("Top", "Not Consistent", "Bottom"))|>
+  mutate(DW_Senate_Tercile = factor(DW_Senate_Tercile, levels = c("Top", "Not Consistent", "Bottom"))|>
+  mutate(State_Lib_Tercile = factor(State_Lib_Tercile, 
+                                    levels = c("Top", "Not Consistent", "Bottom"))|>
+  mutate(Consistency = factor(Consistency, 
+                                    levels = c("Democrat", "Mixed", "Republican")))
+
+
+
+#IMR DW-Nominate Senate
+temp_data <- final_full_trend_data |>
+  mutate(year = Year - 2012,
+         year_bottom = (DW_Senate_Tercile == "Bottom") * year,
+         year2_bottom = (DW_Senate_Tercile == "Bottom") * ifelse(Year<2016, 0, Year - 2016),
+         year3_bottom = (DW_Senate_Tercile == "Bottom") * ifelse(Year<2020, 0, Year - 2020),
+         year_middle = (DW_Senate_Tercile  == "Not Consistent") * year,
+         year2_middle = (DW_Senate_Tercile  == "Not Consistent") * ifelse(Year<2021, 0, Year - 2021),
+         year_top =  (DW_Senate_Tercile  == "Top") * year,
+         year2_top = (DW_Senate_Tercile  == "Top") * ifelse(Year<2022, 0, Year - 2022)) |>
+  filter(!is.na(DW_Senate_Tercile) & !is.na(Infant_MR))
+
+IMR_dwsenate <- lme(fixed = Infant_MR ~ DW_Senate_Tercile + 
+                      year_bottom + year2_bottom + year3_bottom + year_middle + year2_middle + 
+                      year_top + year2_top + Percent_Below_poverty_65_plus +
+                      Percent_Child_Poverty,
+                    random = ~ 1 | State,
+                    data = temp_data)
+summary(IMR_dwsenate)
+
+
+# get betas
+coef_IMR_dwsenate <- tidy(IMR_dwsenate)[1:11,1]
+
+# get betas
+coef_IMR_dwsenate <- tidy(IMR_dwsenate)$estimate[1:11]
+
+# get var-cov matrix
+varcov_IMR_dwsenate <- summary(IMR_dwsenate)$varFix
+  
+# Top vs. Bottom RD in 2012
+top_bottom_2012 <- coef_IMR_dwsenate[3]
+
+c(top_bottom_2012, top_bottom_2012 + c(-1, 1)*1.96*sqrt(varcov_IMR_dwsenate[3, 3]))
+
+# Top vs. bottom RD in 2016
+top_bottom_2016 <- coef_IMR_dwsenate[3] + coef_IMR_dwsenate[4]*(2016-2012) - coef_IMR_dwsenate[9]*(2016-2012)
+
+c(top_bottom_2016, top_bottom_2016 + c(-1, 1)*1.96*sqrt(f_get_variance(varcov_IMR_dwsenate, x=3, y=4, z=9,
+               a=1, b=2016-2012, c=-(2016-2012))))
+
+
+
+# Top vs. bottom RD in 2020
+top_bottom_2020 <- coef_IMR_dwsenate[3] + coef_IMR_dwsenate[4]*(2020-2012) + coef_IMR_dwsenate[5]*(2020-2016)- coef_IMR_dwsenate[9]*(2020-2012)
+
+c(top_bottom_2020, top_bottom_2020 + c(-1, 1)*1.96*sqrt(f_get_variance2(varcov_IMR_dwsenate, w=3, x=4, y=5, z=9,
+                                                                       a=1, b=2020-2012, c=2020-2016, d=-(2020-2012))))
+
+
+# Top vs. bottom RD in 2024
+top_bottom_2024 <- coef_IMR_dwsenate[3] + coef_IMR_dwsenate[4]*(2024-2012) +
+  coef_IMR_dwsenate[5]*(2024-2016) + coef_IMR_dwsenate[6]*(2024-2020) - coef_IMR_dwsenate[9]*(2024-2012) -
+  coef_IMR_dwsenate[10]*(2024-2022)
+
+c(top_bottom_2024, top_bottom_2024 + c(-1, 1)*1.96*sqrt(f_get_variance3(varcov_IMR_dwsenate, 
+                                                                       u = 3, v=4, w=5, x=6, y=9, z=10,
+                                                                       a=1, 
+                                                                       b=2024-2012, 
+                                                                       c=2024-2016,
+                                                                       d=2024-2020,
+                                                                       e=-(2024-2012),
+                                                                       f=-(2024-2022))))
+
+
+
+
+
+
+
+
+# middle vs. top RD in 2012
+mid_top_2012 <- coef_IMR_dwsenate[2]
+c(mid_top_2012, mid_top_2012 + c(-1, 1)*1.96*sqrt(varcov_IMR_dwsenate[2, 2]))
+
+
+# middle vs. top RD in 2016
+mid_top_2016 <- coef_IMR_dwsenate[2] + coef_IMR_dwsenate[7]*(2016-2012) - coef_IMR_dwsenate[9]*(2016-2012)
+
+c(mid_top_2016, mid_top_2016 + c(-1, 1)*1.96*sqrt(f_get_variance(varcov_IMR_dwsenate, x=2, y=7, z=9,
+                                                                       a=1, b=2016-2012, c=-(2016-2012))))
+
+
+
+# middle vs. top RD in 2020
+mid_top_2020 <- coef_IMR_dwsenate[2] + coef_IMR_dwsenate[7]*(2020-2012) - coef_IMR_dwsenate[9]*(2020-2012)
+
+c(mid_top_2020, mid_top_2020 + c(-1, 1)*1.96*sqrt(f_get_variance(varcov_IMR_dwsenate, x=2, y=6, z=8,
+                                                                       a=1, b=2020-2012, c=-(2020-2012))))
+
+
+# middle vs. top RD in 2024
+mid_top_2024 <- coef_IMR_dwsenate[2] + coef_IMR_dwsenate[7]*(2024-2012) +
+  coef_IMR_dwsenate[8]*(2024-2021) - coef_IMR_dwsenate[9]*(2024-2012) -
+  coef_IMR_dwsenate[10]*(2024-2022)
+
+c(mid_top_2024, mid_top_2024 + c(-1, 1)*1.96*sqrt(f_get_variance4(varcov_IMR_dwsenate, 
+                                                                        v = 2, w=7, x=8, y=9, z=10,
+                                                                        a=1, 
+                                                                        b=2024-2012, 
+                                                                        c=2024-2021,
+                                                                        d=-(2024-2012),
+                                                                        e=-(2024-2022))))
+
+
+# first and second slopes for each tercile
+IMR_dwsenate_slopes <- rbind(f_get_slope_first(IMR_dwsenate, 4),
+      f_get_slope_second(IMR_dwsenate, 4, 5),
+      f_get_slope_third(IMR_dwsenate, 4, 5, 6),
+      f_get_slope_first(IMR_dwsenate, 7),
+      f_get_slope_second(IMR_dwsenate, 7, 8),
+      f_get_slope_first(IMR_dwsenate, 9),
+      f_get_slope_second(IMR_dwsenate, 9, 10))
+
+write.csv(IMR_dwsenate_slopes, here("models/IMR_dwsenate_slopes.csv"))
+
+
+
+data.frame(terciles = c("bottom", "middle", "top")) |> 
+  bind_cols(
+      as.data.frame(rbind(f_get_slope_second(IMR_dwsenate, 1, 3),
+                          f_get_slope_second(IMR_dwsenate, 1, 2),
+                          f_get_slope_first(IMR_dwsenate, 1)))) |>
+  rename(estimate = V1, lo95CI = V2, up95CI = V3)
+
+
+#IMR DW-Nominate House
+temp_data <- final_full_trend_data |>
+  mutate(year = Year - 2012,
+         year_bottom = (DW_House_Tercile == "Bottom") * year,
+         year2_bottom = (DW_House_Tercile == "Bottom") * ifelse(Year<2016, 0, Year - 2016),
+         year3_bottom = (DW_House_Tercile == "Bottom") * ifelse(Year<2021, 0, Year - 2021),
+         year_middle = (DW_House_Tercile  == "Not Consistent") * year,
+         year2_middle = (DW_House_Tercile  == "Not Consistent") * ifelse(Year<2021, 0, Year - 2021),
+         year_top =  (DW_House_Tercile  == "Top") * year,
+         year2_top = (DW_House_Tercile  == "Top") * ifelse(Year<2022, 0, Year - 2022)) |>
+  filter(!is.na(DW_House_Tercile) & !is.na(Infant_MR))
+
+IMR_dwhouse <- lme(fixed = Infant_MR ~ DW_House_Tercile + 
+                      year_bottom + year2_bottom + year3_bottom + year_middle + year2_middle + 
+                      year_top + year2_top + Percent_Below_poverty_65_plus +
+                      Percent_Child_Poverty,
+                    random = ~ 1 | State,
+                    data = temp_data)
+summary(IMR_dwhouse)
+
+
+# get betas
+coef_IMR_dwhouse <- tidy(IMR_dwhouse)[1:11,1]
+
+
+# get betas
+coef_IMR_dwhouse <- tidy(IMR_dwhouse)$estimate[1:11]
+
+# get var-cov matrix
+varcov_IMR_dwhouse <- summary(IMR_dwhouse)$varFix
+  
+# Top vs. Bottom RD in 2012
+top_bottom_2012 <- coef_IMR_dwhouse[3]
+
+c(top_bottom_2012, top_bottom_2012 + c(-1, 1)*1.96*sqrt(varcov_IMR_dwhouse[3, 3]))
+# note: we use the Z distribution while the default in broom.mixed::tidy is to use the t distribution,
+# which is more conservative. We should discuss whether this might be better, given the limited
+# number of data points.
+
+# Top vs. bottom RD in 2016
+top_bottom_2016 <- coef_IMR_dwhouse[3] + coef_IMR_dwhouse[4]*(2016-2012) - coef_IMR_dwhouse[9]*(2016-2012)
+
+c(top_bottom_2016, top_bottom_2016 + c(-1, 1)*1.96*sqrt(f_get_variance(varcov_IMR_dwhouse, x=3, y=4, z=9,
+               a=1, b=2016-2012, c=-(2016-2012))))
+
+
+
+# Top vs. bottom RD in 2020
+top_bottom_2020 <- coef_IMR_dwhouse[3] + coef_IMR_dwhouse[4]*(2020-2012) + coef_IMR_dwhouse[5]*(2020-2016)- coef_IMR_dwhouse[9]*(2020-2012)
+
+c(top_bottom_2020, top_bottom_2020 + c(-1, 1)*1.96*sqrt(f_get_variance2(varcov_IMR_dwhouse, w=3, x=4, y=5, z=9,
+                                                                       a=1, b=2020-2012, c=2020-2016, d=-(2020-2012))))
+
+
+# Top vs. bottom RD in 2024
+top_bottom_2024 <- coef_IMR_dwhouse[3] + coef_IMR_dwhouse[4]*(2024-2012) +
+  coef_IMR_dwhouse[5]*(2024-2016) + coef_IMR_dwhouse[6]*(2024-2021) - coef_IMR_dwhouse[9]*(2024-2012) -
+  coef_IMR_dwhouse[10]*(2024-2022)
+
+c(top_bottom_2024, top_bottom_2024 + c(-1, 1)*1.96*sqrt(f_get_variance3(varcov_IMR_dwhouse, 
+                                                                       u = 3, v=4, w=5, x=6, y=9, z=10,
+                                                                       a=1, 
+                                                                       b=2024-2012, 
+                                                                       c=2024-2016,
+                                                                       d=2024-2021,
+                                                                       e=-(2024-2012),
+                                                                       f=-(2024-2022))))
+
+
+
+
+
+
+
+
+# middle vs. top RD in 2012
+mid_top_2012 <- coef_IMR_dwhouse[2]
+c(mid_top_2012, mid_top_2012 + c(-1, 1)*1.96*sqrt(varcov_IMR_dwhouse[2, 2]))
+
+# middle vs. top RD in 2016
+mid_top_2016 <- coef_IMR_dwhouse[2] + coef_IMR_dwhouse[7]*(2016-2012) - coef_IMR_dwhouse[9]*(2016-2012)
+
+c(mid_top_2016, mid_top_2016 + c(-1, 1)*1.96*sqrt(f_get_variance(varcov_IMR_dwhouse, x=2, y=7, z=9,
+                                                                       a=1, b=2016-2012, c=-(2016-2012))))
+
+
+
+# middle vs. top RD in 2020
+mid_top_2020 <- coef_IMR_dwhouse[2] + coef_IMR_dwhouse[7]*(2020-2012) - coef_IMR_dwhouse[9]*(2020-2012)
+
+c(mid_top_2020, mid_top_2020 + c(-1, 1)*1.96*sqrt(f_get_variance(varcov_IMR_dwhouse, x=2, y=6, z=8,
+                                                                       a=1, b=2020-2012, c=-(2020-2012))))
+
+
+# middle vs. top RD in 2024
+mid_top_2024 <- coef_IMR_dwhouse[2] + coef_IMR_dwhouse[7]*(2024-2012) +
+  coef_IMR_dwhouse[8]*(2024-2021) - coef_IMR_dwhouse[9]*(2024-2012) -
+  coef_IMR_dwhouse[10]*(2024-2022)
+
+c(mid_top_2024, mid_top_2024 + c(-1, 1)*1.96*sqrt(f_get_variance4(varcov_IMR_dwhouse, 
+                                                                        v = 2, w=7, x=8, y=9, z=10,
+                                                                        a=1, 
+                                                                        b=2024-2012, 
+                                                                        c=2024-2021,
+                                                                        d=-(2024-2012),
+                                                                        e=-(2024-2022))))
+
+
+
+# first and second slopes for each tercile
+IMR_dwhouse_slopes <- rbind(f_get_slope_first(IMR_dwhouse, 4),
+      f_get_slope_second(IMR_dwhouse, 4, 5),
+      f_get_slope_third(IMR_dwhouse, 4, 5, 6),
+      f_get_slope_first(IMR_dwhouse, 7),
+      f_get_slope_second(IMR_dwhouse, 7, 8),
+      f_get_slope_first(IMR_dwhouse, 9),
+      f_get_slope_second(IMR_dwhouse, 9, 10))
+
+write.csv(IMR_dwhouse_slopes, here("models/IMR_dwhouse_slopes.csv"))
+
+
+
+data.frame(terciles = c("bottom", "middle", "top")) |> 
+  bind_cols(
+      as.data.frame(rbind(f_get_slope_second(IMR_dwhouse, 1, 3),
+                          f_get_slope_second(IMR_dwhouse, 1, 2),
+                          f_get_slope_first(IMR_dwhouse, 1)))) |>
+  rename(estimate = V1, lo95CI = V2, up95CI = V3)
+
+
+
+
+# IMR - State_Lib_Tercile
+temp_data <- final_full_trend_data |>
+  mutate(year = Year - 2012,
+         year_bottom = (State_Lib_Tercile == "Bottom") * year,
+         year2_bottom = (State_Lib_Tercile == "Bottom") * ifelse(Year<2021, 0, Year - 2021),
+         year_middle = (State_Lib_Tercile == "Not Consistent") * year,
+         year2_middle = (State_Lib_Tercile == "Not Consistent") * ifelse(Year<2022, 0, Year - 2022),
+         year_top =  (State_Lib_Tercile == "Top") * year,
+         year2_top = (State_Lib_Tercile == "Top") * ifelse(Year<2022, 0, Year - 2022)) |>
+  filter(!is.na(State_Lib_Tercile) & !is.na(Infant_MR))
+
+IMR_State_Lib <- lme(fixed = Infant_MR ~ State_Lib_Tercile + 
+                     year_bottom + year2_bottom + year_middle + year2_middle + year_top + year2_top +
+                       Percent_Below_poverty_65_plus +
+                     Percent_Child_Poverty,
+      random = ~ 1 | State,
+      data = temp_data)
+
+summary(IMR_State_Lib)
+
+# get betas
+coef_IMR_State_Lib <- tidy(IMR_State_Lib)$estimate[1:10]
+
+# get var-cov matrix
+varcov_IMR_State_Lib <- summary(IMR_State_Lib)$varFix
+  
+# Top vs. Bottom RD in 2012
+top_bottom_2012 <- coef_IMR_State_Lib[3]
+
+c(top_bottom_2012, top_bottom_2012 + c(-1, 1)*1.96*sqrt(varcov_IMR_State_Lib[3, 3]))
+
+# Top vs. bottom RD in 2016
+top_bottom_2016 <- coef_IMR_State_Lib[3] + coef_IMR_State_Lib[4]*(2016-2012) - coef_IMR_State_Lib[8]*(2016-2012)
+
+c(top_bottom_2016, top_bottom_2016 + c(-1, 1)*1.96*sqrt(f_get_variance(varcov_IMR_State_Lib, x=3, y=4, z=8,
+               a=1, b=2016-2012, c=-(2016-2012))))
+
+
+
+# Top vs. bottom RD in 2020
+top_bottom_2020 <- coef_IMR_State_Lib[3] + coef_IMR_State_Lib[4]*(2020-2012) - coef_IMR_State_Lib[8]*(2020-2012)
+
+c(top_bottom_2020, top_bottom_2020 + c(-1, 1)*1.96*sqrt(f_get_variance(varcov_IMR_State_Lib, x=3, y=4, z=8,
+                                                                       a=1, b=2020-2012, c=-(2020-2012))))
+
+
+# Top vs. bottom RD in 2024
+top_bottom_2024 <- coef_IMR_State_Lib[3] + coef_IMR_State_Lib[4]*(2024-2012) +
+  coef_IMR_State_Lib[5]*(2024-2021) - coef_IMR_State_Lib[8]*(2024-2012) -
+  coef_IMR_State_Lib[9]*(2024-2022)
+
+c(top_bottom_2024, top_bottom_2024 + c(-1, 1)*1.96*sqrt(f_get_variance2(varcov_IMR_State_Lib, 
+                                                                       v = 3, w=4, x=5, y=8, z=9,
+                                                                       a=1, 
+                                                                       b=2024-2012, 
+                                                                       c=-(2024-2012),
+                                                                       d=2024-2021,
+                                                                       e=-(2024-2021))))
+
+
+
+
+
+
+# middle vs. top RD in 2012
+mid_top_2012 <- coef_IMR_State_Lib[2]
+c(mid_top_2012, mid_top_2012 + c(-1, 1)*1.96*sqrt(varcov_IMR_State_Lib[2, 2]))
+
+# middle vs. top RD in 2016
+mid_top_2016 <- coef_IMR_State_Lib[2] + coef_IMR_State_Lib[6]*(2016-2012) - coef_IMR_State_Lib[8]*(2016-2012)
+
+c(mid_top_2016, mid_top_2016 + c(-1, 1)*1.96*sqrt(f_get_variance(varcov_IMR_State_Lib, x=2, y=6, z=8,
+                                                                       a=1, b=2016-2012, c=-(2016-2012))))
+
+
+
+# middle vs. top RD in 2020
+mid_top_2020 <- coef_IMR_State_Lib[2] + coef_IMR_State_Lib[6]*(2020-2012) - coef_IMR_State_Lib[8]*(2020-2012)
+
+c(mid_top_2020, mid_top_2020 + c(-1, 1)*1.96*sqrt(f_get_variance(varcov_IMR_State_Lib, x=2, y=6, z=8,
+                                                                       a=1, b=2020-2012, c=-(2020-2012))))
+
+
+# middle vs. top RD in 2024
+mid_top_2024 <- coef_IMR_State_Lib[2] + coef_IMR_State_Lib[6]*(2024-2012) +
+  coef_IMR_State_Lib[7]*(2024-2021) - coef_IMR_State_Lib[8]*(2024-2012) -
+  coef_IMR_State_Lib[9]*(2024-2022)
+
+c(mid_top_2024, mid_top_2024 + c(-1, 1)*1.96*sqrt(f_get_variance2(varcov_IMR_State_Lib, 
+                                                                        v = 2, w=6, x=7, y=8, z=9,
+                                                                        a=1, 
+                                                                        b=2024-2012, 
+                                                                        c=2024-2021,
+                                                                        d=-(2024-2012),
+                                                                        e=-(2024-2022))))
+
+
+
+# calculate slopes
+
+# first and second slopes for each tercile
+IMR_State_Lib_slopes <- rbind(f_get_slope_first(IMR_State_Lib, 4),
+      f_get_slope_second(IMR_State_Lib, 4, 5),
+      f_get_slope_first(IMR_State_Lib, 6),
+      f_get_slope_second(IMR_State_Lib, 6, 7),
+      f_get_slope_first(IMR_State_Lib, 8),
+      f_get_slope_second(IMR_State_Lib, 8, 9))
+
+write.csv(IMR_State_Lib_slopes, here("models/IMR_State_Lib_slopes.csv"))
+
+
+# IMR State Trifecta
+
+data.frame(terciles = c("bottom", "middle", "top")) |> 
+  bind_cols(
+      as.data.frame(rbind(f_get_slope_second(IMR_State_Lib, 1, 3),
+                          f_get_slope_second(IMR_State_Lib, 1, 2),
+                          f_get_slope_first(IMR_State_Lib, 1)))) |>
+  rename(estimate = V1, lo95CI = V2, up95CI = V3)
+
+
+
+temp_data <- final_full_trend_data |>
+  mutate(year = Year - 2012,
+         year_bottom = (Consistency == "Republican") * year,
+         year2_bottom = (Consistency == "Republican") * ifelse(Year<2016, 0, Year - 2016),
+         year3_bottom = (Consistency == "Republican") * ifelse(Year<2020, 0, Year - 2020),
+         year_middle = (Consistency == "Mixed") * year,
+         year2_middle = (Consistency == "Mixed") * ifelse(Year<2021, 0, Year - 2021),
+         year_top =  (Consistency == "Democrat") * year,
+         year2_top = (Consistency == "Democrat") * ifelse(Year<2022, 0, Year - 2022)) |>
+  filter(!is.na(Consistency) & !is.na(Infant_MR))
+
+IMR_Trifecta <- lme(fixed = Infant_MR ~ Consistency + 
+                      year_bottom + year2_bottom + year3_bottom + year_middle + year2_middle + 
+                      year_top + year2_top + Percent_Below_poverty_65_plus +
+                      Percent_Child_Poverty,
+                    random = ~ 1 | State,
+                    data = temp_data)
+summary(IMR_Trifecta)
+
+
+# get betas
+coef_IMR_trifecta <- tidy(IMR_Trifecta)[1:11,1]
+
+# get betas
+coef_IMR_trifecta <- tidy(IMR_Trifecta)$estimate[1:11]
+
+# get var-cov matrix
+varcov_IMR_trifecta <- summary(IMR_Trifecta)$varFix
+  
+# Top vs. Bottom RD in 2012
+top_bottom_2012 <- coef_IMR_trifecta[3]
+
+c(top_bottom_2012, top_bottom_2012 + c(-1, 1)*1.96*sqrt(varcov_IMR_trifecta[3, 3]))
+
+# Top vs. bottom RD in 2016
+top_bottom_2016 <- coef_IMR_trifecta[3] + coef_IMR_trifecta[4]*(2016-2012) - coef_IMR_trifecta[9]*(2016-2012)
+
+c(top_bottom_2016, top_bottom_2016 + c(-1, 1)*1.96*sqrt(f_get_variance(varcov_IMR_trifecta, x=3, y=4, z=9,
+               a=1, b=2016-2012, c=-(2016-2012))))
+
+
+
+# Top vs. bottom RD in 2020
+top_bottom_2020 <- coef_IMR_trifecta[3] + coef_IMR_trifecta[4]*(2020-2012) + coef_IMR_trifecta[5]*(2020-2016)- coef_IMR_trifecta[9]*(2020-2012)
+
+c(top_bottom_2020, top_bottom_2020 + c(-1, 1)*1.96*sqrt(f_get_variance2(varcov_IMR_trifecta, w=3, x=4, y=5, z=9,
+                                                                       a=1, b=2020-2012, c=2020-2016, d=-(2020-2012))))
+
+
+# Top vs. bottom RD in 2024
+top_bottom_2024 <- coef_IMR_trifecta[3] + coef_IMR_trifecta[4]*(2024-2012) +
+  coef_IMR_trifecta[5]*(2024-2016) + coef_IMR_trifecta[6]*(2024-2020) - coef_IMR_trifecta[9]*(2024-2012) -
+  coef_IMR_trifecta[10]*(2024-2022)
+
+c(top_bottom_2024, top_bottom_2024 + c(-1, 1)*1.96*sqrt(f_get_variance3(varcov_IMR_trifecta, 
+                                                                       u = 3, v=4, w=5, x=6, y=9, z=10,
+                                                                       a=1, 
+                                                                       b=2024-2012, 
+                                                                       c=2024-2016,
+                                                                       d=2024-2020,
+                                                                       e=-(2024-2012),
+                                                                       f=-(2024-2022))))
+
+
+
+
+
+
+
+
+# middle vs. top RD in 2012
+mid_top_2012 <- coef_IMR_trifecta[2]
+c(mid_top_2012, mid_top_2012 + c(-1, 1)*1.96*sqrt(varcov_IMR_trifecta[2, 2]))
+
+# middle vs. top RD in 2016
+mid_top_2016 <- coef_IMR_trifecta[2] + coef_IMR_trifecta[7]*(2016-2012) - coef_IMR_trifecta[9]*(2016-2012)
+
+c(mid_top_2016, mid_top_2016 + c(-1, 1)*1.96*sqrt(f_get_variance(varcov_IMR_trifecta, x=2, y=7, z=9,
+                                                                       a=1, b=2016-2012, c=-(2016-2012))))
+
+
+
+# middle vs. top RD in 2020
+mid_top_2020 <- coef_IMR_trifecta[2] + coef_IMR_trifecta[7]*(2020-2012) - coef_IMR_trifecta[9]*(2020-2012)
+
+c(mid_top_2020, mid_top_2020 + c(-1, 1)*1.96*sqrt(f_get_variance(varcov_IMR_trifecta, x=2, y=7, z=9,
+                                                                       a=1, b=2020-2012, c=-(2020-2012))))
+
+
+# middle vs. top RD in 2024
+mid_top_2024 <- coef_IMR_trifecta[2] + coef_IMR_trifecta[7]*(2024-2012) +
+  coef_IMR_trifecta[8]*(2024-2021) - coef_IMR_trifecta[9]*(2024-2012) -
+  coef_IMR_trifecta[10]*(2024-2022)
+
+c(mid_top_2024, mid_top_2024 + c(-1, 1)*1.96*sqrt(f_get_variance4(varcov_IMR_trifecta, 
+                                                                        v = 2, w=7, x=8, y=9, z=10,
+                                                                        a=1, 
+                                                                        b=2024-2012, 
+                                                                        c=2024-2021,
+                                                                        d=-(2024-2012),
+                                                                        e=-(2024-2022))))
+
+
+
+# first and second slopes for each tercile
+IMR_trifecta_slopes <- rbind(f_get_slope_first(IMR_Trifecta, 4),
+      f_get_slope_second(IMR_Trifecta, 4, 5),
+      f_get_slope_third(IMR_Trifecta, 4, 5, 6),
+      f_get_slope_first(IMR_Trifecta, 7),
+      f_get_slope_second(IMR_Trifecta, 7, 8),
+      f_get_slope_first(IMR_Trifecta, 9),
+      f_get_slope_second(IMR_Trifecta, 9, 10))
+
+write.csv(IMR_trifecta_slopes, here("models/IMR_trifecta_slopes.csv"))
+
+
+# Baseline rates
+
+data.frame(terciles = c("bottom", "middle", "top")) |> 
+  bind_cols(
+      as.data.frame(rbind(f_get_slope_second(IMR_Trifecta, 1, 3),
+                          f_get_slope_second(IMR_Trifecta, 1, 2),
+                          f_get_slope_first(IMR_Trifecta, 1)))) |>
+  rename(estimate = V1, lo95CI = V2, up95CI = V3)
+
+
+
+#PMR - DW-Nominate House
+
+temp_data <- final_full_trend_data |>
+   mutate(year = Year - 2012,
+         year_bottom = (DW_House_Tercile == "Bottom") * year,
+         year2_bottom = (DW_House_Tercile == "Bottom") * ifelse(Year<2018, 0, Year - 2018),
+         year3_bottom = (DW_House_Tercile == "Bottom") * ifelse(Year<2021, 0, Year - 2021),
+         year_middle = (DW_House_Tercile  == "Not Consistent") * year,
+         year2_middle = (DW_House_Tercile  == "Not Consistent") * ifelse(Year<2018, 0, Year - 2018),
+         year3_middle = (DW_House_Tercile  == "Not Consistent") * ifelse(Year<2021, 0, Year - 2021),
+         year_top =  (DW_House_Tercile  == "Top") * year,
+         year2_top = (DW_House_Tercile  == "Top") * ifelse(Year<2018, 0, Year - 2018),
+         year3_top = (DW_House_Tercile  == "Top") * ifelse(Year<2021, 0, Year - 2021)) |>
+  filter(!is.na(DW_House_Tercile) & !is.na(Age_Adjusted_Premature_Mortality))
+
+PMR_dwhouse <- lme(fixed = Age_Adjusted_Premature_Mortality ~ DW_House_Tercile + 
+                      year_bottom + year2_bottom + year3_bottom + year_middle + year2_middle + year3_middle + 
+                      year_top + year2_top + year3_top +
+                      Percent_Below_poverty_65_plus + Percent_Child_Poverty,
+                    random = ~ 1 | State,
+                    data = temp_data)
+summary(PMR_dwhouse)
+
+
+# get betas
+coef_PMR_dwhouse <- tidy(PMR_dwhouse)$estimate[1:13]
+# get var-cov matrix
+varcov_PMR_dwhouse <- summary(PMR_dwhouse)$varFix
+  
+# Top vs. Bottom RD in 2012
+top_bottom_2012 <- coef_PMR_dwhouse[3]
+
+c(top_bottom_2012, top_bottom_2012 + c(-1, 1)*1.96*sqrt(varcov_PMR_dwhouse[3, 3]))
+
+# Top vs. bottom RD in 2016
+top_bottom_2016 <- coef_PMR_dwhouse[3] + coef_PMR_dwhouse[4]*(2016-2012) - coef_PMR_dwhouse[10]*(2016-2012)
+
+c(top_bottom_2016, top_bottom_2016 + c(-1, 1)*1.96*sqrt(f_get_variance(varcov_PMR_dwhouse, x=3, y=4, z=10,
+               a=1, b=2016-2012, c=-(2016-2012))))
+
+
+
+# Top vs. bottom RD in 2020
+top_bottom_2020 <- coef_PMR_dwhouse[3] + coef_PMR_dwhouse[4]*(2020-2012) + coef_PMR_dwhouse[5]*(2020-2018)- coef_PMR_dwhouse[10]*(2020-2012) - coef_PMR_dwhouse[11]*(2020-2018)
+
+c(top_bottom_2020, top_bottom_2020 + c(-1, 1)*1.96*sqrt(f_get_variance4(varcov_PMR_dwhouse, v=3, w=4, x=5, y=10, z=11,
+                                                                       a=1, b=2020-2012, c=2020-2018, d=-(2020-2012),
+                                                                       e=-(2020-2018))))
+
+
+# Top vs. bottom RD in 2024
+top_bottom_2024 <- coef_PMR_dwhouse[3] + coef_PMR_dwhouse[4]*(2024-2012) +
+  coef_PMR_dwhouse[5]*(2024-2018) + coef_PMR_dwhouse[6]*(2024-2021) - coef_PMR_dwhouse[10]*(2024-2012) -
+  coef_PMR_dwhouse[11]*(2024-2018) - coef_PMR_dwhouse[12]*(2024-2021)
+
+c(top_bottom_2024, top_bottom_2024 + c(-1, 1)*1.96*sqrt(f_get_variance5(varcov_PMR_dwhouse, 
+                                                                       t=3, u = 4, v=5, w=6, x=10, y=11, z=12,
+                                                                       a=1, 
+                                                                       b=2024-2012, 
+                                                                       c=2024-2018,
+                                                                       d=2024-2021,
+                                                                       e=-(2024-2012),
+                                                                       f=-(2024-2018),
+                                                                       g=-(2024-2021))))
+
+
+
+
+
+
+
+# middle vs. top RD in 2012
+mid_top_2012 <- coef_PMR_dwhouse[2]
+c(mid_top_2012, mid_top_2012 + c(-1, 1)*1.96*sqrt(varcov_PMR_dwhouse[2, 2]))
+
+# middle vs. top RD in 2016
+mid_top_2016 <- coef_PMR_dwhouse[2] + coef_PMR_dwhouse[7]*(2016-2012) - coef_PMR_dwhouse[10]*(2016-2012)
+
+c(mid_top_2016, mid_top_2016 + c(-1, 1)*1.96*sqrt(f_get_variance(varcov_PMR_dwhouse, x=2, y=7, z=10,
+                                                                       a=1, b=2016-2012, c=-(2016-2012))))
+
+
+
+# middle vs. top RD in 2020
+mid_top_2020 <- coef_PMR_dwhouse[2] + coef_PMR_dwhouse[7]*(2020-2012) + coef_PMR_dwhouse[8]*(2020-2018) - coef_PMR_dwhouse[10]*(2020-2012) + coef_PMR_dwhouse[11]*(2020-2018)
+
+c(mid_top_2020, mid_top_2020 + c(-1, 1)*1.96*sqrt(f_get_variance4(varcov_PMR_dwhouse,  v=2, w=7, x=8, y=10, z=11,
+                                                                       a=1, b=2020-2012, c=2020-2018,
+                                                                       d=-(2020-2012), e=-(2020-2018))))
+
+
+# middle vs. top RD in 2024
+mid_top_2024 <- coef_PMR_dwhouse[2] + coef_PMR_dwhouse[7]*(2024-2012) +
+  coef_PMR_dwhouse[8]*(2024-2018) + coef_PMR_dwhouse[9]*(2024-2021) -
+  coef_PMR_dwhouse[10]*(2024-2012) - coef_PMR_dwhouse[11]*(2024-2018) - coef_PMR_dwhouse[12]*(2024-2021)
+
+c(mid_top_2024, mid_top_2024 + c(-1, 1)*1.96*sqrt(f_get_variance5(varcov_PMR_dwhouse, 
+                                                                        t=2, u=7, v=8, w=9, x=10, y=11, z=12,
+                                                                        a=1, 
+                                                                        b=2024-2012, 
+                                                                        c=2024-2018,
+                                                                        d=2024-2021,
+                                                                        e=-(2024-2012),
+                                                                        f=-(2024-2028),
+                                                                        g=-(2024-2021))))
+
+
+
+# first and second slopes for each tercile
+PMR_dwhouse_slopes <- rbind(
+  f_get_slope_first(PMR_dwhouse, 4),
+      f_get_slope_second(PMR_dwhouse, 4, 5),
+      f_get_slope_third(PMR_dwhouse, 4, 5, 6),
+      f_get_slope_first(PMR_dwhouse, 7),
+      f_get_slope_second(PMR_dwhouse, 7, 8),
+      f_get_slope_third(PMR_dwhouse, 7, 8, 9),
+      f_get_slope_first(PMR_dwhouse, 10),
+      f_get_slope_second(PMR_dwhouse, 10, 11),
+      f_get_slope_third(PMR_dwhouse, 10, 11, 12))
+
+write.csv(PMR_dwhouse_slopes, here("models/PMR_dwhouse_slopes.csv"))
+
+
+
+data.frame(terciles = c("bottom", "middle", "top")) |> 
+  bind_cols(
+      as.data.frame(rbind(f_get_slope_second(PMR_dwhouse, 1, 3),
+                          f_get_slope_second(PMR_dwhouse, 1, 2),
+                          f_get_slope_first(PMR_dwhouse, 1)))) |>
+  rename(estimate = V1, lo95CI = V2, up95CI = V3)
+
+
+#PMR - DW-Nominate Senate
+temp_data <- final_full_trend_data |>
+  mutate(year = Year - 2012,
+         year_bottom = (DW_Senate_Tercile == "Bottom") * year,
+         year2_bottom = (DW_Senate_Tercile == "Bottom") * ifelse(Year<2018, 0, Year - 2018),
+         year3_bottom = (DW_Senate_Tercile == "Bottom") * ifelse(Year<2021, 0, Year - 2021),
+         year_middle = (DW_Senate_Tercile  == "Not Consistent") * year,
+         year2_middle = (DW_Senate_Tercile  == "Not Consistent") * ifelse(Year<2018, 0, Year - 2018),
+         year3_middle = (DW_Senate_Tercile  == "Not Consistent") * ifelse(Year<2021, 0, Year - 2021),
+         year_top =  (DW_Senate_Tercile  == "Top") * year,
+         year2_top = (DW_Senate_Tercile  == "Top") * ifelse(Year<2018, 0, Year - 2018),
+         year3_top = (DW_Senate_Tercile  == "Top") * ifelse(Year<2021, 0, Year - 2021)) |>
+  filter(!is.na(DW_Senate_Tercile) & !is.na(Age_Adjusted_Premature_Mortality))
+
+PMR_dwsenate <- lme(fixed = Age_Adjusted_Premature_Mortality ~ DW_Senate_Tercile + 
+                      year_bottom + year2_bottom + year3_bottom + year_middle + year2_middle + year3_middle + 
+                      year_top + year2_top + year3_top +
+                      Percent_Below_poverty_65_plus + Percent_Child_Poverty,
+                    random = ~ 1 | State,
+                    data = temp_data)
+summary(PMR_dwsenate)
+
+
+# get betas
+coef_PMR_dwsenate <- tidy(PMR_dwsenate)$estimate[1:13]
+
+
+# get var-cov matrix
+varcov_PMR_dwsenate <- summary(PMR_dwsenate)$varFix
+  
+# Top vs. Bottom RD in 2012
+top_bottom_2012 <- coef_PMR_dwsenate[3]
+
+c(top_bottom_2012, top_bottom_2012 + c(-1, 1)*1.96*sqrt(varcov_PMR_dwsenate[3, 3]))
+
+# Top vs. bottom RD in 2016
+top_bottom_2016 <- coef_PMR_dwsenate[3] + coef_PMR_dwsenate[4]*(2016-2012) - coef_PMR_dwsenate[10]*(2016-2012)
+
+c(top_bottom_2016, top_bottom_2016 + c(-1, 1)*1.96*sqrt(f_get_variance(varcov_PMR_dwsenate, x=3, y=4, z=10,
+               a=1, b=2016-2012, c=-(2016-2012))))
+
+
+
+# Top vs. bottom RD in 2020
+top_bottom_2020 <- coef_PMR_dwsenate[3] + coef_PMR_dwsenate[4]*(2020-2012) + coef_PMR_dwsenate[5]*(2020-2018)- coef_PMR_dwsenate[10]*(2020-2012) - coef_PMR_dwsenate[11]*(2020-2018)
+
+c(top_bottom_2020, top_bottom_2020 + c(-1, 1)*1.96*sqrt(f_get_variance4(varcov_PMR_dwsenate, v=3, w=4, x=5, y=10, z=11,
+                                                                       a=1, b=2020-2012, c=2020-2018, d=-(2020-2012),
+                                                                       e=-(2020-2018))))
+
+
+# Top vs. bottom RD in 2024
+top_bottom_2024 <- coef_PMR_dwsenate[3] + coef_PMR_dwsenate[4]*(2024-2012) +
+  coef_PMR_dwsenate[5]*(2024-2018) + coef_PMR_dwsenate[6]*(2024-2021) - coef_PMR_dwsenate[10]*(2024-2012) -
+  coef_PMR_dwsenate[11]*(2024-2018) - coef_PMR_dwsenate[12]*(2024-2021)
+
+c(top_bottom_2024, top_bottom_2024 + c(-1, 1)*1.96*sqrt(f_get_variance5(varcov_PMR_dwsenate, 
+                                                                       t=3, u = 4, v=5, w=6, x=10, y=11, z=12,
+                                                                       a=1, 
+                                                                       b=2024-2012, 
+                                                                       c=2024-2018,
+                                                                       d=2024-2021,
+                                                                       e=-(2024-2012),
+                                                                       f=-(2024-2018),
+                                                                       g=-(2024-2021))))
+
+
+
+
+
+
+
+# middle vs. top RD in 2012
+mid_top_2012 <- coef_PMR_dwsenate[2]
+c(mid_top_2012, mid_top_2012 + c(-1, 1)*1.96*sqrt(varcov_PMR_dwsenate[2, 2]))
+
+# middle vs. top RD in 2016
+mid_top_2016 <- coef_PMR_dwsenate[2] + coef_PMR_dwsenate[7]*(2016-2012) - coef_PMR_dwsenate[10]*(2016-2012)
+
+c(mid_top_2016, mid_top_2016 + c(-1, 1)*1.96*sqrt(f_get_variance(varcov_PMR_dwsenate, x=2, y=7, z=10,
+                                                                       a=1, b=2016-2012, c=-(2016-2012))))
+
+
+
+# middle vs. top RD in 2020
+mid_top_2020 <- coef_PMR_dwsenate[2] + coef_PMR_dwsenate[7]*(2020-2012) + coef_PMR_dwsenate[8]*(2020-2018) - coef_PMR_dwsenate[10]*(2020-2012) + coef_PMR_dwsenate[11]*(2020-2018)
+
+c(mid_top_2020, mid_top_2020 + c(-1, 1)*1.96*sqrt(f_get_variance4(varcov_PMR_dwsenate,  v=2, w=7, x=8, y=10, z=11,
+                                                                       a=1, b=2020-2012, c=2020-2018,
+                                                                       d=-(2020-2012), e=-(2020-2018))))
+
+
+# middle vs. top RD in 2024
+mid_top_2024 <- coef_PMR_dwsenate[2] + coef_PMR_dwsenate[7]*(2024-2012) +
+  coef_PMR_dwsenate[8]*(2024-2018) + coef_PMR_dwsenate[9]*(2024-2021) -
+  coef_PMR_dwsenate[10]*(2024-2012) - coef_PMR_dwsenate[11]*(2024-2018) - coef_PMR_dwsenate[12]*(2024-2021)
+
+c(mid_top_2024, mid_top_2024 + c(-1, 1)*1.96*sqrt(f_get_variance5(varcov_PMR_dwsenate, 
+                                                                        t=2, u=7, v=8, w=9, x=10, y=11, z=12,
+                                                                        a=1, 
+                                                                        b=2024-2012, 
+                                                                        c=2024-2018,
+                                                                        d=2024-2021,
+                                                                        e=-(2024-2012),
+                                                                        f=-(2024-2028),
+                                                                        g=-(2024-2021))))
+
+
+
+# first and second slopes for each tercile
+PMR_dwsenate_slopes <- rbind(
+  f_get_slope_first(PMR_dwsenate, 4),
+      f_get_slope_second(PMR_dwsenate, 4, 5),
+      f_get_slope_third(PMR_dwsenate, 4, 5, 6),
+      f_get_slope_first(PMR_dwsenate, 7),
+      f_get_slope_second(PMR_dwsenate, 7, 8),
+      f_get_slope_third(PMR_dwsenate, 7, 8, 9),
+      f_get_slope_first(PMR_dwsenate, 10),
+      f_get_slope_second(PMR_dwsenate, 10, 11),
+      f_get_slope_third(PMR_dwsenate, 10, 11, 12))
+
+write.csv(PMR_dwsenate_slopes, here("models/PMR_dwsenate_slopes.csv"))
+
+
+
+data.frame(terciles = c("bottom", "middle", "top")) |> 
+  bind_cols(
+      as.data.frame(rbind(f_get_slope_second(PMR_dwsenate, 1, 3),
+                          f_get_slope_second(PMR_dwsenate, 1, 2),
+                          f_get_slope_first(PMR_dwsenate, 1)))) |>
+  rename(estimate = V1, lo95CI = V2, up95CI = V3)
+
+#PMR - State Liberalism
+
+
+temp_data <- final_full_trend_data |>
+  mutate(year = Year - 2012,
+         year_bottom = (State_Lib_Tercile == "Bottom") * year,
+         year2_bottom = (State_Lib_Tercile == "Bottom") * ifelse(Year<2018, 0, Year - 2021),
+         year3_bottom = (State_Lib_Tercile == "Bottom") * ifelse(Year<2021, 0, Year - 2021),
+         year_middle = (State_Lib_Tercile == "Not Consistent") * year,
+         year2_middle = (State_Lib_Tercile == "Not Consistent") * ifelse(Year<2018, 0, Year - 2018),
+         year3_middle = (State_Lib_Tercile == "Not Consistent") * ifelse(Year<2021, 0, Year - 2021),
+         year_top =  (State_Lib_Tercile == "Top") * year,
+         year2_top = (State_Lib_Tercile == "Top") * ifelse(Year<2018, 0, Year - 2018),
+         year3_top = (State_Lib_Tercile == "Top") * ifelse(Year<2021, 0, Year - 2021))|>
+  filter(!is.na(State_Lib_Tercile) & !is.na(Age_Adjusted_Premature_Mortality))
+
+
+PMR_state_lib <- lme(
+  fixed = Age_Adjusted_Premature_Mortality ~ State_Lib_Tercile +
+    year_bottom + year2_bottom + year3_bottom + year_middle + year2_middle + year3_middle +
+    year_top + year2_top + year3_top + Percent_Below_poverty_65_plus + Percent_Child_Poverty,
+  random = ~ 1 | State,
+  data = temp_data
+)
+summary(PMR_state_lib)
+
+
+# get betas
+coef_PMR_state_lib <- tidy(PMR_state_lib)$estimate[1:13]
+
+# get var-cov matrix
+varcov_PMR_state_lib <- summary(PMR_state_lib)$varFix
+  
+# Top vs. Bottom RD in 2012
+top_bottom_2012 <- coef_PMR_state_lib[3]
+
+c(top_bottom_2012, top_bottom_2012 + c(-1, 1)*1.96*sqrt(varcov_PMR_state_lib[3, 3]))
+
+# Top vs. bottom RD in 2016
+top_bottom_2016 <- coef_PMR_state_lib[3] + coef_PMR_state_lib[4]*(2016-2012) - coef_PMR_state_lib[10]*(2016-2012)
+
+c(top_bottom_2016, top_bottom_2016 + c(-1, 1)*1.96*sqrt(f_get_variance(varcov_PMR_state_lib, x=3, y=4, z=10,
+               a=1, b=2016-2012, c=-(2016-2012))))
+
+
+
+# Top vs. bottom RD in 2020
+top_bottom_2020 <- coef_PMR_state_lib[3] + coef_PMR_state_lib[4]*(2020-2012) + coef_PMR_state_lib[5]*(2020-2018)- coef_PMR_state_lib[10]*(2020-2012) - coef_PMR_state_lib[11]*(2020-2018)
+
+c(top_bottom_2020, top_bottom_2020 + c(-1, 1)*1.96*sqrt(f_get_variance4(varcov_PMR_state_lib, v=3, w=4, x=5, y=10, z=11,
+                                                                       a=1, b=2020-2012, c=2020-2018, d=-(2020-2012),
+                                                                       e=-(2020-2018))))
+
+
+# Top vs. bottom RD in 2024
+top_bottom_2024 <- coef_PMR_state_lib[3] + coef_PMR_state_lib[4]*(2024-2012) +
+  coef_PMR_state_lib[5]*(2024-2018) + coef_PMR_state_lib[6]*(2024-2021) - coef_PMR_state_lib[10]*(2024-2012) -
+  coef_PMR_state_lib[11]*(2024-2018) - coef_PMR_state_lib[12]*(2024-2021)
+
+c(top_bottom_2024, top_bottom_2024 + c(-1, 1)*1.96*sqrt(f_get_variance5(varcov_PMR_state_lib, 
+                                                                       t=3, u = 4, v=5, w=6, x=10, y=11, z=12,
+                                                                       a=1, 
+                                                                       b=2024-2012, 
+                                                                       c=2024-2018,
+                                                                       d=2024-2021,
+                                                                       e=-(2024-2012),
+                                                                       f=-(2024-2018),
+                                                                       g=-(2024-2021))))
+
+
+
+
+
+
+
+# middle vs. top RD in 2012
+mid_top_2012 <- coef_PMR_state_lib[2]
+c(mid_top_2012, mid_top_2012 + c(-1, 1)*1.96*sqrt(varcov_PMR_state_lib[2, 2]))
+
+
+# middle vs. top RD in 2016
+mid_top_2016 <- coef_PMR_state_lib[2] + coef_PMR_state_lib[7]*(2016-2012) - coef_PMR_state_lib[10]*(2016-2012)
+
+c(mid_top_2016, mid_top_2016 + c(-1, 1)*1.96*sqrt(f_get_variance(varcov_PMR_state_lib, x=2, y=7, z=10,
+                                                                       a=1, b=2016-2012, c=-(2016-2012))))
+
+
+
+# middle vs. top RD in 2020
+mid_top_2020 <- coef_PMR_state_lib[2] + coef_PMR_state_lib[7]*(2020-2012) + coef_PMR_state_lib[8]*(2020-2018) - coef_PMR_state_lib[10]*(2020-2012) + coef_PMR_state_lib[11]*(2020-2018)
+
+c(mid_top_2020, mid_top_2020 + c(-1, 1)*1.96*sqrt(f_get_variance4(varcov_PMR_state_lib,  v=2, w=7, x=8, y=10, z=11,
+                                                                       a=1, b=2020-2012, c=2020-2018,
+                                                                       d=-(2020-2012), e=-(2020-2018))))
+
+
+# middle vs. top RD in 2024
+mid_top_2024 <- coef_PMR_state_lib[2] + coef_PMR_state_lib[7]*(2024-2012) +
+  coef_PMR_state_lib[8]*(2024-2018) + coef_PMR_state_lib[9]*(2024-2021) -
+  coef_PMR_state_lib[10]*(2024-2012) - coef_PMR_state_lib[11]*(2024-2018) - coef_PMR_state_lib[12]*(2024-2021)
+
+c(mid_top_2024, mid_top_2024 + c(-1, 1)*1.96*sqrt(f_get_variance5(varcov_PMR_state_lib, 
+                                                                        t=2, u=7, v=8, w=9, x=10, y=11, z=12,
+                                                                        a=1, 
+                                                                        b=2024-2012, 
+                                                                        c=2024-2018,
+                                                                        d=2024-2021,
+                                                                        e=-(2024-2012),
+                                                                        f=-(2024-2028),
+                                                                        g=-(2024-2021))))
+
+
+
+# first and second slopes for each tercile
+PMR_state_lib_slopes <- rbind(
+  f_get_slope_first(PMR_state_lib, 4),
+      f_get_slope_second(PMR_state_lib, 4, 5),
+      f_get_slope_third(PMR_state_lib, 4, 5, 6),
+      f_get_slope_first(PMR_state_lib, 7),
+      f_get_slope_second(PMR_state_lib, 7, 8),
+      f_get_slope_third(PMR_state_lib, 7, 8, 9),
+      f_get_slope_first(PMR_state_lib, 10),
+      f_get_slope_second(PMR_state_lib, 10, 11),
+      f_get_slope_third(PMR_state_lib, 10, 11, 12))
+
+write.csv(PMR_state_lib_slopes, here("models/PMR_state_lib_slopes.csv"))
+
+
+
+data.frame(terciles = c("bottom", "middle", "top")) |> 
+  bind_cols(
+      as.data.frame(rbind(f_get_slope_second(PMR_state_lib, 1, 3),
+                          f_get_slope_second(PMR_state_lib, 1, 2),
+                          f_get_slope_first(PMR_state_lib, 1)))) |>
+  rename(estimate = V1, lo95CI = V2, up95CI = V3)
+
+
+#PMR - State Trifecta
+temp_data <- final_full_trend_data |>
+  mutate(year = Year - 2012,
+         year_bottom = (Consistency == "Republican") * year,
+         year2_bottom = (Consistency == "Republican") * ifelse(Year<2018, 0, Year - 2018),
+         year3_bottom = (Consistency == "Republican") * ifelse(Year<2021, 0, Year - 2021),
+         year_middle = (Consistency == "Mixed") * year,
+         year2_middle = (Consistency == "Mixed") * ifelse(Year<2018, 0, Year - 2018),
+         year3_middle = (Consistency == "Mixed") * ifelse(Year<2021, 0, Year - 2021),
+         year_top =  (Consistency == "Democrat") * year,
+         year2_top = (Consistency == "Democrat") * ifelse(Year<2018, 0, Year - 2018),
+         year3_top = (Consistency == "Democrat") * ifelse(Year<2021, 0, Year - 2021)) |>
+  filter(!is.na(Consistency) & !is.na(Age_Adjusted_Premature_Mortality))
+
+PMR_trifecta <- lme(
+  fixed = Age_Adjusted_Premature_Mortality ~ Consistency +
+    year_bottom + year2_bottom + year3_bottom + year_middle + year2_middle + year3_middle +
+    year_top + year2_top + year3_top + Percent_Below_poverty_65_plus + Percent_Child_Poverty,
+  random = ~ 1 | State,
+  data = temp_data
+)
+summary(PMR_trifecta)
+
+
+# get betas
+coef_PMR_trifecta <- tidy(PMR_trifecta)$estimate[1:13]
+
+# get var-cov matrix
+varcov_PMR_trifecta <- summary(PMR_trifecta)$varFix
+  
+# Top vs. Bottom RD in 2012
+top_bottom_2012 <- coef_PMR_trifecta[3]
+
+c(top_bottom_2012, top_bottom_2012 + c(-1, 1)*1.96*sqrt(varcov_PMR_trifecta[3, 3]))
+
+# Top vs. bottom RD in 2016
+top_bottom_2016 <- coef_PMR_trifecta[3] + coef_PMR_trifecta[4]*(2016-2012) - coef_PMR_trifecta[10]*(2016-2012)
+
+c(top_bottom_2016, top_bottom_2016 + c(-1, 1)*1.96*sqrt(f_get_variance(varcov_PMR_trifecta, x=3, y=4, z=10,
+               a=1, b=2016-2012, c=-(2016-2012))))
+
+
+
+# Top vs. bottom RD in 2020
+top_bottom_2020 <- coef_PMR_trifecta[3] + coef_PMR_trifecta[4]*(2020-2012) + coef_PMR_trifecta[5]*(2020-2018)- coef_PMR_trifecta[10]*(2020-2012) - coef_PMR_trifecta[11]*(2020-2018)
+
+c(top_bottom_2020, top_bottom_2020 + c(-1, 1)*1.96*sqrt(f_get_variance4(varcov_PMR_trifecta, v=3, w=4, x=5, y=10, z=11,
+                                                                       a=1, b=2020-2012, c=2020-2018, d=-(2020-2012),
+                                                                       e=-(2020-2018))))
+
+
+# Top vs. bottom RD in 2024
+top_bottom_2024 <- coef_PMR_trifecta[3] + coef_PMR_trifecta[4]*(2024-2012) +
+  coef_PMR_trifecta[5]*(2024-2018) + coef_PMR_trifecta[6]*(2024-2021) - coef_PMR_trifecta[10]*(2024-2012) -
+  coef_PMR_trifecta[11]*(2024-2018) - coef_PMR_trifecta[12]*(2024-2021)
+
+c(top_bottom_2024, top_bottom_2024 + c(-1, 1)*1.96*sqrt(f_get_variance5(varcov_PMR_trifecta, 
+                                                                       t=3, u = 4, v=5, w=6, x=10, y=11, z=12,
+                                                                       a=1, 
+                                                                       b=2024-2012, 
+                                                                       c=2024-2018,
+                                                                       d=2024-2021,
+                                                                       e=-(2024-2012),
+                                                                       f=-(2024-2018),
+                                                                       g=-(2024-2021))))
+
+
+
+
+
+
+
+# middle vs. top RD in 2012
+mid_top_2012 <- coef_PMR_trifecta[2]
+c(mid_top_2012, mid_top_2012 + c(-1, 1)*1.96*sqrt(varcov_PMR_trifecta[2, 2]))
+
+# middle vs. top RD in 2016
+mid_top_2016 <- coef_PMR_trifecta[2] + coef_PMR_trifecta[7]*(2016-2012) - coef_PMR_trifecta[10]*(2016-2012)
+
+c(mid_top_2016, mid_top_2016 + c(-1, 1)*1.96*sqrt(f_get_variance(varcov_PMR_trifecta, x=2, y=7, z=10,
+                                                                       a=1, b=2016-2012, c=-(2016-2012))))
+
+
+
+# middle vs. top RD in 2020
+mid_top_2020 <- coef_PMR_trifecta[2] + coef_PMR_trifecta[7]*(2020-2012) + coef_PMR_trifecta[8]*(2020-2018) - coef_PMR_trifecta[10]*(2020-2012) + coef_PMR_trifecta[11]*(2020-2018)
+
+c(mid_top_2020, mid_top_2020 + c(-1, 1)*1.96*sqrt(f_get_variance4(varcov_PMR_trifecta,  v=2, w=7, x=8, y=10, z=11,
+                                                                       a=1, b=2020-2012, c=2020-2018,
+                                                                       d=-(2020-2012), e=-(2020-2018))))
+
+
+# middle vs. top RD in 2024
+mid_top_2024 <- coef_PMR_trifecta[2] + coef_PMR_trifecta[7]*(2024-2012) +
+  coef_PMR_trifecta[8]*(2024-2018) + coef_PMR_trifecta[9]*(2024-2021) -
+  coef_PMR_trifecta[10]*(2024-2012) - coef_PMR_trifecta[11]*(2024-2018) - coef_PMR_trifecta[12]*(2024-2021)
+
+c(mid_top_2024, mid_top_2024 + c(-1, 1)*1.96*sqrt(f_get_variance5(varcov_PMR_trifecta, 
+                                                                        t=2, u=7, v=8, w=9, x=10, y=11, z=12,
+                                                                        a=1, 
+                                                                        b=2024-2012, 
+                                                                        c=2024-2018,
+                                                                        d=2024-2021,
+                                                                        e=-(2024-2012),
+                                                                        f=-(2024-2028),
+                                                                        g=-(2024-2021))))
+
+
+
+# first and second slopes for each tercile
+PMR_trifecta_slopes <- rbind(
+  f_get_slope_first(PMR_trifecta, 4),
+      f_get_slope_second(PMR_trifecta, 4, 5),
+      f_get_slope_third(PMR_trifecta, 4, 5, 6),
+      f_get_slope_first(PMR_trifecta, 7),
+      f_get_slope_second(PMR_trifecta, 7, 8),
+      f_get_slope_third(PMR_trifecta, 7, 8, 9),
+      f_get_slope_first(PMR_trifecta, 10),
+      f_get_slope_second(PMR_trifecta, 10, 11),
+      f_get_slope_third(PMR_trifecta, 10, 11, 12))
+
+write.csv(PMR_trifecta_slopes, here("models/PMR_trifecta_slopes.csv"))
+
+
+
+data.frame(terciles = c("bottom", "middle", "top")) |> 
+  bind_cols(
+      as.data.frame(rbind(f_get_slope_second(PMR_trifecta, 1, 3),
+                          f_get_slope_second(PMR_trifecta, 1, 2),
+                          f_get_slope_first(PMR_trifecta, 1)))) |>
+  rename(estimate = V1, lo95CI = V2, up95CI = V3)
 
 
 # uninsured - State_Lib_Tercile
+
 uninsured_statelib_temp_data <- final_full_trend_data |>
   mutate(year = Year - 2012,
          year_bottom = (State_Lib_Tercile == "Bottom") * year,
