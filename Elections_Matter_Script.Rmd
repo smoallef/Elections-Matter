@@ -3296,6 +3296,8 @@ ggsave("row_four_with_legend_uninsured.pdf", plot = row_four_uninsured, width = 
 
 #Joinpoint / segmented regression analysis
 ```{r}
+
+#functions and code for IMR and PMR were created by Dr. Jarvis Chen and adapted by SM for %uninsured
 f_get_variance <- function(varcov, x, y, z, a, b, c){
   this_variance <- a^2*varcov[x, x] + b^2*varcov[y, y] + c^2*varcov[z, z] +
     2*a*b*varcov[x, y] + 2*a*c*varcov[x, z] + 2*b*c*varcov[y, z]
@@ -3310,7 +3312,16 @@ f_get_variance2 <- function(varcov, w, x, y, z, a, b, c, d){
   return(this_variance)
 }
 
-f_get_variance3 <- function(varcov, u, v, w, x, y, z, a, b, c, d, e, f){
+f_get_variance3 <- function(varcov, v, w, x, y, z, a, b, c, d, e){
+  this_variance <- a^2*varcov[v, v] + b^2*varcov[w, w] + c^2*varcov[x, x] + d^2*varcov[y, y] + e^2*varcov[z, z] +
+    2*a*b*varcov[v, w] + 2*a*c*varcov[v, x] + 2*a*d*varcov[v, y] + 2*a*e*varcov[v, z] +
+    2*b*c*varcov[w, x] + 2*b*d*varcov[w, y] + 2*b*e*varcov[w, z] +
+    2*c*d*varcov[x, y] + 2*c*e*varcov[x, z] +
+    2*d*e*varcov[y, z]
+  return(this_variance)
+}
+
+f_get_variance4 <- function(varcov, u, v, w, x, y, z, a, b, c, d, e, f){
   this_variance <- a^2*varcov[u, u] + b^2*varcov[v, v] + c^2*varcov[w, w] +
     d^2*varcov[x, x] + e^2*varcov[y, y] + f^2*varcov[z, z] +
     2*a*b*varcov[u, v] + 2*a*c*varcov[u, w] + 2*a*d*varcov[u, x] + 2*a*e*varcov[u, y] + 2*a*f*varcov[u, z] +
@@ -3322,14 +3333,7 @@ f_get_variance3 <- function(varcov, u, v, w, x, y, z, a, b, c, d, e, f){
 }
 
 
-f_get_variance4 <- function(varcov, v, w, x, y, z, a, b, c, d, e){
-  this_variance <- a^2*varcov[v, v] + b^2*varcov[w, w] + c^2*varcov[x, x] + d^2*varcov[y, y] + e^2*varcov[z, z] +
-    2*a*b*varcov[v, w] + 2*a*c*varcov[v, x] + 2*a*d*varcov[v, y] + 2*a*e*varcov[v, z] +
-    2*b*c*varcov[w, x] + 2*b*d*varcov[w, y] + 2*b*e*varcov[w, z] +
-    2*c*d*varcov[x, y] + 2*c*e*varcov[x, z] +
-    2*d*e*varcov[y, z]
-  return(this_variance)
-}
+
 
 
 final_full_trend_data <- readRDS(here("final_full_trend_data_2012_2024.rds")) |>
