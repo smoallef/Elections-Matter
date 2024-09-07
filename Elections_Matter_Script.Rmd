@@ -38,35 +38,23 @@ library(gridExtra)
 
 #Political metrics		
 #-- Cook PVI	2022	https://www.cookpolitical.com/cook-pvi/2022-partisan-voting-index/state-map-and-list
-
 #-- State liberalism index	2012-2020	https://www.dropbox.com/t/MRDUHsLpFAzNBDhu
-
 #-- DW-nominate	2012-2024	https://voteview.com/about
-
 #-- State trifecta	2012-2024	https://ballotpedia.org/State_government_trifectas
 
 #Health outcomes		
 #-- Infant mortality rates	2012-2024	https://wonder.cdc.gov/
-
 #-- Premature mortality rates	2012-2024	https://wonder.cdc.gov/
-
 #-- % of adults without health insurance (ages 35-65)	2012-2022	https://data2.nhgis.org/main 
-
 #-- % children 24 months who have completed the 7 vaccine series	2020-2022 	https://www.cdc.gov/vaccines/imz-managers/coverage/childvaxview/index.html
-
 #-- % adults age ≥65 vaccinated for the flu 	2022	https://www.americashealthrankings.org/explore/measures/flu_vaccine_sr
-
 #-- % adults age ≥65 who received a COVID-19 booster	2023-2024	https://www.cdc.gov/vaccines/imz-managers/coverage/covidvaxview/index.html
-
 #-- % of households food insecure	2020-2022	https://www.ers.usda.gov/topics/food-nutrition-assistance/food-security-in-the-u-s/key-statistics-graphics/
-
 #-- % of women ages 15-44 living in a county designated as a maternity care desert	2021-2022	https://www.americashealthrankings.org/explore/measures/maternity_care_desert
 
 #Socioeconomic covariates		
 #-- % of children below poverty (persons < age 18)	2012-2022	https://datacenter.aecf.org/data/tables/43-children-in-poverty
-
 #-- % of adults age ≥65 below poverty	2012-2022	https://data.census.gov/table/ACSST1Y2022.S1701?q=poverty&g=010XX00US$0400000
-
 #State population estimates (for weighting for sensitivity analyses)	2020 -2023	https://www.census.gov/data/tables/time-series/demo/popest/2020s-national-detail.html
 
 
