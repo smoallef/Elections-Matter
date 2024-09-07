@@ -34,50 +34,42 @@ library(gridExtra)
 #Datasets
 ```{r}
 
-#Read datasets in:
-imr_2022_2024 <- readRDS(file = "final_imr_2022_2024.rds")
-imr_2012_2024_total_pop<-readRDS(file = "/imr_2012_2024_total_pop.rds")
-racial_premature_mortality_2022_2024 <- readRDS(file = "cdc_final_racial_premature_deaths_2022_2024_data.rds")
-premature_mortality_2022_2024<-readRDS(file = "/premature_mortality_2022_2024.rds")
-total_premature_mortality_2012_2024 <- readRDS(file = "cdc_final_total_premature_deaths_2012_2024_data.rds")
-us_total_premature_mortality_2012_2024 <- read_csv(file ="Premature Mortality Total for US total.csv")  
-flu_vaccination_data <- read_csv("2024-senior-report.csv") 
-final_child_vaccines_2022_data <- readRDS(file = "final_child _vaccines_2022data.rds")
-nis_adult_covid_vaccines<-read_csv("National_Immunization_Survey_Adult_COVID_Module__NIS-ACM___COVIDVaxViews__Data___Centers_for_Disease_Control_and_Prevention__cdc.gov__20240701.csv")
-nis_adult_covid_BOOSTER_vaccines <- nis_adult_covid_vaccines%>%
-  filter( `Indicator Name` == "Vaccination Coverage and Intent" & `Group Category` == "65+ years" & `Geography Type` == "Jurisdictional Estimates" & `Indicator Category` == "Received a 2023-2024 COVID-19 vaccine dose (among all adults 18+)")
-food_insecurity<-readRDS(file = "food_insecurity_2020to2022.rds")
-maternity_care_deserts <-read_csv("2023-hwc-report-report-data-all-states.csv")
-child_poverty <-read_excel("Children in poverty.xlsx")
-final_child_poverty_2012_2024 <- readRDS(file = "final_child_poverty_2012_2022_DC.rds")
-final_elderly_poverty_2012_2024_data <- readRDS(file = "final_elderly_poverty_2012_2024_data.rds")
-CookPVI_2022_state_scores<-readRDS(file = "/CookPVI_2022_state_scores.rds")
-statelib<-read_dta("CaugheyWarshaw_DynamicDemocracyAmericanStates_Export_2021.dta") 
-statelib_2012_to_2020_data <- readRDS(file = "flipped_statelib_2012_to_2020_data.rds")
-state_trifecta<-read_excel("State Trifecta data.xlsx") 
-state_trifecta_2012_2024_data<-read_csv("Trifecta Trends by State and Year.csv") 
-DW_House_112<-read_csv("H112_members.csv") 
-DW_House_113<-read_csv("H113_members.csv") 
-DW_House_114<-read_csv("H114_members.csv") 
-DW_House_115<-read_csv("H115_members.csv") 
-DW_House_116<-read_csv("H116_members.csv") 
-DW_House_117<-read_csv("H117_members.csv") 
-DW_House_118<-read_csv("H118_members.csv") 
-data_list <- list(DW_House_112, DW_House_113, DW_House_114, DW_House_115, DW_House_116, DW_House_117, DW_House_118)
-combined_DW_House_data <- do.call(rbind, data_list)
-#write.csv(combined_DW_House_data, file ="combined_DW_House_data_112_118.csv")
-combined_DW_House_data_112_118<-read_csv("Tcombined_DW_House_data_112_118.csv") DW_Senate_112<-read_csv("S112_members.csv") 
-DW_Senate_113<-read_csv("S113_members.csv") 
-DW_Senate_114<-read_csv("S114_members.csv") 
-DW_Senate_115<-read_csv("/S115_members.csv") 
-DW_Senate_116<-read_csv("S116_members.csv") 
-DW_Senate_117<-read_csv("S117_members.csv") 
-DW_Senate_118<-read_csv("S118_members.csv") 
-senate_list <- list(DW_Senate_112, DW_Senate_113, DW_Senate_114, DW_Senate_115, DW_Senate_116, DW_Senate_117, DW_Senate_118)
-combined_DW_Senate_data <- do.call(rbind, senate_list)
-head(combined_DW_Senate_data)
-#write.csv(combined_DW_Senate_data, file ="combined_DW_Senate_data_112_118.csv")
-combined_DW_Senate_data_112_118<-read_csv("combined_DW_Senate_data_112_118.csv")
+#Data need to be downloaded, cleaned, and read into R
+
+#Political metrics		
+#-- Cook PVI	2022	https://www.cookpolitical.com/cook-pvi/2022-partisan-voting-index/state-map-and-list
+
+#-- State liberalism index	2012-2020	https://www.dropbox.com/t/MRDUHsLpFAzNBDhu
+
+#-- DW-nominate	2012-2024	https://voteview.com/about
+
+#-- State trifecta	2012-2024	https://ballotpedia.org/State_government_trifectas
+
+#Health outcomes		
+#-- Infant mortality rates	2012-2024	https://wonder.cdc.gov/
+
+#-- Premature mortality rates	2012-2024	https://wonder.cdc.gov/
+
+#-- % of adults without health insurance (ages 35-65)	2012-2022	https://data2.nhgis.org/main 
+
+#-- % children 24 months who have completed the 7 vaccine series	2020-2022 	https://www.cdc.gov/vaccines/imz-managers/coverage/childvaxview/index.html
+
+#-- % adults age ≥65 vaccinated for the flu 	2022	https://www.americashealthrankings.org/explore/measures/flu_vaccine_sr
+
+#-- % adults age ≥65 who received a COVID-19 booster	2023-2024	https://www.cdc.gov/vaccines/imz-managers/coverage/covidvaxview/index.html
+
+#-- % of households food insecure	2020-2022	https://www.ers.usda.gov/topics/food-nutrition-assistance/food-security-in-the-u-s/key-statistics-graphics/
+
+#-- % of women ages 15-44 living in a county designated as a maternity care desert	2021-2022	https://www.americashealthrankings.org/explore/measures/maternity_care_desert
+
+#Socioeconomic covariates		
+#-- % of children below poverty (persons < age 18)	2012-2022	https://datacenter.aecf.org/data/tables/43-children-in-poverty
+
+#-- % of adults age ≥65 below poverty	2012-2022	https://data.census.gov/table/ACSST1Y2022.S1701?q=poverty&g=010XX00US$0400000
+
+#State population estimates (for weighting for sensitivity analyses)	2020 -2023	https://www.census.gov/data/tables/time-series/demo/popest/2020s-national-detail.html
+
+
 
 
 ```
