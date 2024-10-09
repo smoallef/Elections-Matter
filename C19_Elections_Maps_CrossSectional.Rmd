@@ -22,7 +22,6 @@ library("ggpubr")
 
 
 # Change this to local data folder
-data_loc <- "/Users/vic404/Library/CloudStorage/GoogleDrive-vcowger@g.harvard.edu/My Drive/FXB/C19 Elections paper dataset "
 data_loc <- here::here("_data")
 
 ```
@@ -180,12 +179,12 @@ all_dat_sf <- all_dat_long %>% left_join(state_sf, by = "state") %>% st_as_sf()
 ## Mapping function
 ```{r, fig.width = 8, fig.height= 4}
 zoom <- 80000
-zoom <- 80000
 
 # Function To Create Map With Histogram
 map_panel_hist_right <- function(dat_sf, var_plot, scale = FALSE, panel_lab, legend_lab, 
                       break_vals = NULL, n_breaks = NULL, percent = FALSE, accur = 0.1, 
                       leg.width = 1.5, bivar_colors = FALSE, asym_colors = FALSE, 
+                      pos_health_colors = FALSE,
                       expand_width = 0.02, leg_scale = 0.97, 
                       layout_in = "bin", plot_stack = FALSE, stack_width = 0.25, stack_mult = 0.9,
                       bar_histogram = FALSE, bar_hist_widths = c(4.75,1),
@@ -229,6 +228,7 @@ map_panel_hist_right <- function(dat_sf, var_plot, scale = FALSE, panel_lab, leg
   }
   
   break_pal <- pals::brewer.greys(length(break_labs))
+  if(pos_health_colors){break_pal <- pals::brewer.purples(length(break_labs))}
   if(bivar_colors==TRUE){break_pal <- pals::brewer.rdbu(length(break_labs))}
   if(asym_colors == TRUE){
     neg_vals <- which(break_vals<=0)
@@ -465,18 +465,19 @@ map_out_uninsured <- map_panel_hist_right(all_dat_sf, "uninsured", panel_lab = "
 
 map_out_child_vax <- map_panel_hist_right(all_dat_sf, "child_vax", 
                                           panel_lab = "Childhood\nVaccinations", legend_lab = "%", 
-                                    expand_width = 0.03,leg_scale = 0.96,bar_histogram = TRUE, 
+                                    expand_width = 0.03,leg_scale = 0.96, bar_histogram = TRUE, 
+                                    pos_health_colors = TRUE,
                         n_breaks=9, percent = TRUE, leg.width =leg_width_temp, scale = FALSE, accur = 1.0)
 
 map_out_adult_covid_vax <- map_panel_hist_right(all_dat_sf, "adult65_covid_booster", 
                                           panel_lab = "COVID-19\nBooster\nAges 65+", legend_lab = "%", 
-                                          bar_histogram = TRUE,
+                                          bar_histogram = TRUE, pos_health_colors = TRUE,
                         n_breaks=8, percent = TRUE, leg.width =leg_width_temp, scale = FALSE, accur = 1, 
                         expand_width = 0.05)
 
 map_out_adult_flu_vax <- map_panel_hist_right(all_dat_sf, "adult65_flu_vax", 
                                               panel_lab = "Flu Vaccine\nAges 65+", legend_lab = "%", 
-                                              bar_histogram = TRUE, 
+                                              bar_histogram = TRUE,  pos_health_colors = TRUE,
                         n_breaks=8, percent = TRUE, leg.width =leg_width_temp, scale = FALSE, accur = 1)
 
 
